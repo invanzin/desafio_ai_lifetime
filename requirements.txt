@@ -1,0 +1,89 @@
+# =============================================================================
+# DEPENDÊNCIAS DO PROJETO
+# =============================================================================
+# Este arquivo contém todas as dependências necessárias para o projeto.
+# Organize as dependências por categoria para facilitar a manutenção.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Framework Web e Servidor ASGI
+# -----------------------------------------------------------------------------
+
+# FastAPI: Framework web moderno e de alto desempenho para construção de APIs
+# com Python 3.7+. Utiliza type hints nativos do Python e gera documentação
+# automática (OpenAPI/Swagger).
+fastapi==0.115.0
+
+# Uvicorn: Servidor ASGI ultra-rápido para aplicações web assíncronas.
+# O pacote [standard] inclui dependências extras como uvloop e httptools
+# para máximo desempenho.
+uvicorn[standard]==0.30.6
+
+# -----------------------------------------------------------------------------
+# Validação de Dados e Configurações
+# -----------------------------------------------------------------------------
+
+# Pydantic: Biblioteca para validação de dados usando type annotations do Python.
+# Garante que os dados estejam no formato correto e facilita a serialização/
+# deserialização de objetos.
+pydantic==2.9.2
+
+# Pydantic Settings: Extensão do Pydantic para gerenciar configurações da aplicação,
+# permitindo carregar settings de variáveis de ambiente, arquivos .env, etc.
+pydantic-settings==2.5.2
+
+# -----------------------------------------------------------------------------
+# Logging e Observabilidade
+# -----------------------------------------------------------------------------
+
+# Structlog: Biblioteca para logging estruturado em Python. Produz logs em formato
+# JSON ou outros formatos estruturados, facilitando análise e debugging.
+structlog==24.4.0
+
+# -----------------------------------------------------------------------------
+# Inteligência Artificial e LLMs
+# -----------------------------------------------------------------------------
+
+# Langchain: Framework para desenvolvimento de aplicações com modelos de linguagem (LLMs).
+# Facilita a criação de chains, prompts, memory e integrações com diversos LLMs.
+langchain==0.3.2
+
+# Langchain OpenAI: Integração do Langchain com os modelos da OpenAI (GPT-3.5, GPT-4, etc).
+# Fornece wrappers e utilidades específicas para uso dos modelos OpenAI.
+langchain-openai==0.2.2
+
+# OpenAI: SDK oficial da OpenAI para Python. Permite acesso direto aos modelos
+# de IA da OpenAI como GPT-4, DALL-E, Whisper, entre outros.
+openai==1.47.0
+
+# -----------------------------------------------------------------------------
+# Utilitários e Helpers
+# -----------------------------------------------------------------------------
+
+# Tenacity: Biblioteca para implementação de retry logic com estratégias configuráveis.
+# Útil para lidar com falhas transitórias em chamadas de rede ou APIs externas.
+tenacity==8.5.0
+
+# HTTPX: Cliente HTTP moderno para Python com suporte a async/await e HTTP/2.
+# Uma alternativa ao requests com melhor performance em contextos assíncronos.
+httpx==0.27.2
+
+# Python Dotenv: Carrega variáveis de ambiente a partir de arquivos .env.
+# Facilita o gerenciamento de configurações sensíveis e ambiente-específicas.
+python-dotenv==1.0.1
+
+# -----------------------------------------------------------------------------
+# Testing e Qualidade de Código
+# -----------------------------------------------------------------------------
+
+# Pytest: Framework de testes mais popular do Python. Oferece sintaxe simples,
+# fixtures poderosas e plugins extensíveis para todos os tipos de testes.
+pytest==8.3.3
+
+# Pytest Asyncio: Plugin do Pytest para testar código assíncrono (async/await).
+# Adiciona fixtures e markers específicos para testes de código asyncio.
+pytest-asyncio==0.24.0
+
+# Pytest Mock: Plugin do Pytest que simplifica a criação de mocks e stubs nos testes,
+# integrando a biblioteca unittest.mock com fixtures do pytest.
+pytest-mock==3.14.0

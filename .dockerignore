@@ -1,0 +1,67 @@
+# ============================================================================
+# .dockerignore - Arquivos/pastas a IGNORAR ao construir imagem Docker
+# ============================================================================
+# Similar ao .gitignore, mas para Docker build
+# Por que? Imagens menores e builds mais rápidos
+# ============================================================================
+
+# Ambientes virtuais Python
+venv/
+env/
+ENV/
+.venv
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Arquivos de ambiente
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentação (não precisa na imagem)
+documentation/
+*.md
+
+# Dados de teste
+Base_Dados/
+Briefing/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Arquivos temporários
+tmp/
+temp/
+*.tmp
+
+

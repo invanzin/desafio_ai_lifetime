@@ -1,0 +1,71 @@
+# ============================================================================
+# Docker Compose - Orquestração de containers
+# ============================================================================
+# Facilita rodar o serviço + dependências (se houver)
+#
+# Uso:
+#   docker-compose up          # Inicia em foreground
+#   docker-compose up -d       # Inicia em background (detached)
+#   docker-compose down        # Para e remove containers
+#   docker-compose logs -f     # Visualiza logs em tempo real
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # Serviço principal: Meeting Extractor
+  meeting-extractor:
+    # Nome do container
+    container_name: meeting-extractor-api
+    
+    # Build a partir do Dockerfile local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Portas: host:container
+    ports:
+      - "8000:8000"
+    
+    # Variáveis de ambiente
+    # IMPORTANTE: Nunca commitar .env com API keys reais!
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    
+    # Ou carrega de arquivo .env
+    env_file:
+      - .env
+    
+    # Restart automático em caso de crash
+    restart: unless-stopped
+    
+    # Health check (sobrescreve o do Dockerfile se quiser)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Recursos (opcional, mas recomendado em produção)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'      # Máximo 1 CPU
+          memory: 1G        # Máximo 1GB RAM
+        reservations:
+          cpus: '0.5'      # Mínimo 0.5 CPU
+          memory: 512M      # Mínimo 512MB RAM
+    
+    # Volumes (se quiser persistir dados)
+    # volumes:
+    #   - ./logs:/app/logs
+
+# Rede (opcional, para comunicação entre containers)
+networks:
+  default:
+    name: meeting-extractor-network
+
+
