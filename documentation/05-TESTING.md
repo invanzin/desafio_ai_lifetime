@@ -13,17 +13,18 @@
 
 ## 🎯 Visão Geral
 
-Este projeto possui **44 testes automatizados** organizados em 5 arquivos:
+Este projeto possui **53 testes automatizados** organizados em 6 arquivos:
 
 | Arquivo | Tipo | Testes | Tempo | Status |
 |---------|------|--------|-------|--------|
 | `test_schemas.py` | Unitário | 18 | ~0.5s | ✅ |
 | `test_extractor.py` | Unitário | 11 | ~4s | ✅ |
 | `test_main_api.py` | Integração | 15 | ~3s | ✅ |
+| `test_error_502.py` | Integração | 9 | ~4.5s | ✅ |
 | `test_api.py` | E2E | - | - | ⏭️ Skipped |
 | `test_challenge_audit.py` | Auditoria | - | - | Manual |
 
-**Total:** 44 testes | ~8s | ✅ 100% passando
+**Total:** 53 testes | ~12s | ✅ 100% passando
 
 ### Ferramentas
 - `pytest` - Framework de testes
@@ -41,6 +42,7 @@ projeto/tests/
 │   └── test_extractor.py        # Funções auxiliares (11 testes)
 └── integration/
     ├── test_main_api.py         # Endpoints HTTP (15 testes)
+    ├── test_error_502.py        # Erros 502 Bad Gateway (9 testes)
     ├── test_api.py              # E2E com OpenAI (skipped)
     └── test_challenge_audit.py  # Auditoria do briefing
 ```
@@ -155,7 +157,82 @@ pytest tests/integration/test_main_api.py -v
 
 ---
 
-### 2. `test_api.py` - Testes End-to-End (Skipped)
+### 2. `test_error_502.py` - Erros 502 Bad Gateway (9 testes)
+
+**Localização:** `tests/integration/test_error_502.py`  
+**Tempo de execução:** ~4.5s
+
+#### Propósito
+Testa o tratamento de erros 502 (Bad Gateway) quando há falhas na comunicação com a OpenAI API ou quando a OpenAI retorna dados inválidos. Usa **mocks** para simular exceções sem chamar a API real.
+
+#### Cenários de Erro 502
+
+**1. Erros de Comunicação com OpenAI:**
+- `RateLimitError` - OpenAI bloqueia por rate limit
+- `APITimeoutError` - Timeout ao chamar a API (30s)
+- `APIError` - Erro genérico da OpenAI (500, 503, etc)
+
+**2. Resposta Inválida:**
+- `ValidationError` - OpenAI retorna JSON malformado/incompleto (após tentativas de repair)
+
+#### Lista de Testes
+
+| # | Nome do Teste | O que Simula | O que Valida |
+|---|---------------|--------------|--------------|
+| 1 | `test_502_rate_limit_error` | Rate limit da OpenAI (429) | Status 502, mensagem clara, error_type |
+| 2 | `test_502_api_timeout_error` | Timeout após 30s sem resposta | Status 502, mensagem de timeout |
+| 3 | `test_502_api_generic_error` | Erro genérico (500, 503) | Status 502, APIError no response |
+| 4 | `test_502_validation_error_invalid_response` | JSON inválido da OpenAI | Status 502, mensagem de dados incompletos |
+| 5 | `test_retries_before_502` | Falha após 3 tentativas | Sistema tenta 3x antes de retornar 502 |
+| 6 | `test_502_response_structure` | Qualquer erro 502 | Estrutura JSON padronizada (error, message, request_id) |
+| 7-9 | `test_502_works_with_all_input_formats` | Erro com 3 formatos | Funciona com transcript, transcript+metadata, raw_meeting |
+
+#### Técnica de Mock
+
+Os testes usam `unittest.mock.patch` para simular exceções da OpenAI sem fazer chamadas reais:
+
+```python
+with patch('app.main.extract_meeting_chain', new_callable=AsyncMock) as mock_extract:
+    # Simula erro da OpenAI
+    mock_extract.side_effect = APITimeoutError(request=MagicMock())
+    
+    # Faz requisição
+    response = client.post("/extract", json=payload)
+    
+    # Valida resposta 502
+    assert response.status_code == 502
+    assert response.json()["error"] == "openai_communication_error"
+```
+
+#### Estrutura de Resposta 502
+
+Todos os erros 502 seguem a mesma estrutura:
+
+```json
+{
+    "error": "openai_communication_error" | "openai_invalid_response",
+    "message": "Descrição legível do erro",
+    "error_type": "RateLimitError | APITimeoutError | APIError",
+    "request_id": "uuid-v4"
+}
+```
+
+#### Por que mockar?
+
+- ✅ **Velocidade:** Testes rodam em ~4.5s vs minutos com API real
+- ✅ **Confiabilidade:** Não depende de falhas reais da OpenAI
+- ✅ **Custo:** Não consome créditos da API
+- ✅ **Previsibilidade:** Testa cenários específicos de forma determinística
+- ✅ **CI/CD:** Pode rodar em pipelines sem API keys
+
+#### Rodar testes
+```bash
+pytest tests/integration/test_error_502.py -v
+```
+
+---
+
+### 3. `test_api.py` - Testes End-to-End (Skipped)
 
 **Localização:** `tests/integration/test_api.py`  
 **Tempo de execução:** ~60s (quando habilitado)
@@ -178,7 +255,7 @@ pytest tests/integration/test_api.py -v
 
 ---
 
-### 3. `test_challenge_audit.py` - Auditoria do Briefing (Script)
+### 4. `test_challenge_audit.py` - Auditoria do Briefing (Script)
 
 **Localização:** `tests/integration/test_challenge_audit.py`  
 **Tipo:** Script manual (não roda com pytest)
@@ -217,22 +294,24 @@ source venv/bin/activate  # Linux/Mac
 
 ```bash
 # Rodar TODOS os testes
-pytest tests/unit/ tests/integration/test_main_api.py -v
+pytest tests/unit/ tests/integration/test_main_api.py tests/integration/test_error_502.py -v
 
-# Rodar apenas unitários
+# Apenas unitários
 pytest tests/unit/ -v
 
-# Rodar apenas integração
-pytest tests/integration/test_main_api.py -v
+# Apenas integração
+pytest tests/integration/test_main_api.py tests/integration/test_error_502.py -v
 
 # Rodar arquivo específico
 pytest tests/unit/test_schemas.py -v
+pytest tests/integration/test_error_502.py -v
 
 # Rodar teste específico
 pytest tests/unit/test_schemas.py::test_extract_request_both_formats_fails -v
 
 # Por palavra-chave
 pytest -k "422" -v                    # Todos com "422"
+pytest -k "502" -v                    # Todos com "502"
 pytest -k "metadata" -v               # Todos com "metadata"
 
 # Com logs detalhados
@@ -329,10 +408,10 @@ pytest tests/ --random-order
 
 | Métrica | Valor |
 |---------|-------|
-| **Total de Testes** | 44 |
-| **Testes Passando** | ✅ 44 (100%) |
-| **Tempo Total** | ~8s |
-| **Cobertura** | ~85% |
+| **Total de Testes** | 53 |
+| **Testes Passando** | ✅ 53 (100%) |
+| **Tempo Total** | ~12s |
+| **Cobertura** | ~90% |
 
 ### Arquivos de Teste
 
@@ -341,6 +420,7 @@ pytest tests/ --random-order
 | `test_schemas.py` | Unitário | 18 | Validação Pydantic |
 | `test_extractor.py` | Unitário | 11 | Funções auxiliares |
 | `test_main_api.py` | Integração | 15 | Endpoints HTTP |
+| `test_error_502.py` | Integração | 9 | Erros 502 (mocks) |
 | `test_api.py` | E2E | - | Skipped (OpenAI) |
 | `test_challenge_audit.py` | Script | - | Auditoria manual |
 
@@ -348,16 +428,20 @@ pytest tests/ --random-order
 
 ```bash
 # Rodar tudo
-pytest tests/unit/ tests/integration/test_main_api.py -v
+pytest tests/unit/ tests/integration/test_main_api.py tests/integration/test_error_502.py -v
 
 # Apenas unitários
 pytest tests/unit/ -v
+
+# Apenas erros 502
+pytest tests/integration/test_error_502.py -v
 
 # Teste específico
 pytest tests/unit/test_schemas.py::test_extract_request_both_formats_fails -v
 
 # Por palavra-chave
 pytest -k "422" -v
+pytest -k "502" -v
 ```
 
 ---
