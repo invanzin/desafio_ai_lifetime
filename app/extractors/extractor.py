@@ -20,8 +20,8 @@ import json
 from typing import Optional
 from dotenv import load_dotenv
 
+# LLM
 # LangChain imports
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
@@ -31,6 +31,8 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
+    before_sleep_log,
+    after_log,
 )
 
 # OpenAI exceptions
@@ -42,6 +44,7 @@ import logging
 # Schemas internos
 from app.models.schemas import NormalizedInput, ExtractedMeeting
 
+from llm.openai_client import default_client
 
 
 # ============================================================================
@@ -51,11 +54,7 @@ from app.models.schemas import NormalizedInput, ExtractedMeeting
 # Carrega variáveis de ambiente do arquivo .env
 load_dotenv()
 
-# Configuração básica de logging (será substituído por structlog no futuro)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Logger (configurado centralmente via app.config.logging_config)
 logger = logging.getLogger(__name__)
 
 
@@ -63,40 +62,8 @@ logger = logging.getLogger(__name__)
 # INICIALIZAÇÃO DO LLM E PROMPT
 # ============================================================================
 
-def _get_llm():
-    """
-    Inicializa e retorna o modelo de linguagem OpenAI configurado.
-    
-    Configurações aplicadas:
-    - Modelo: obtido da env var OPENAI_MODEL (padrão: gpt-4o)
-    - Temperature: 0 (determinístico, sem alucinações)
-    - Timeout: 30 segundos (requisito do briefing)
-    
-    Returns:
-        ChatOpenAI: Instância configurada do modelo de linguagem
-    
-    Raises:
-        ValueError: Se OPENAI_API_KEY não estiver definida
-    """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "OPENAI_API_KEY não encontrada. "
-            "Configure a variável de ambiente no arquivo .env"
-        )
-    
-    model_name = os.getenv("OPENAI_MODEL", "gpt-4o")
-    
-    return ChatOpenAI(
-        model=model_name,
-        temperature=0,  # Determinístico para evitar variações
-        timeout=30.0,   # Timeout máximo de 30s (requisito do briefing)
-        api_key=api_key,
-    )
-
-
-# Instância global do LLM (reutilizada entre chamadas)
-llm = _get_llm()
+# LLM
+llm = default_client.get_llm()
 
 # Parser para extrair JSON da resposta do LLM
 parser = JsonOutputParser()
@@ -105,65 +72,65 @@ parser = JsonOutputParser()
 prompt = ChatPromptTemplate.from_messages([
     ("system", """Você é um assistente especializado em extrair informações estruturadas de transcrições de reuniões bancárias.
 
-Sua tarefa é analisar a transcrição fornecida e os metadados (se disponíveis) e retornar um JSON válido no formato especificado abaixo.
+    Sua tarefa é analisar a transcrição fornecida e os metadados (se disponíveis) e retornar um JSON válido no formato especificado abaixo.
 
-**REGRAS IMPORTANTES:**
+    **REGRAS IMPORTANTES:**
 
-1. **PRIORIDADE DOS METADADOS:**
-   - Se metadados forem fornecidos (METADATA não vazio), USE-OS COMO VERDADE ABSOLUTA
-   - Não altere, não invente, não "corrija" dados fornecidos nos metadados
-   - Metadados fornecidos têm prioridade sobre qualquer informação na transcrição
+    1. **PRIORIDADE DOS METADADOS:**
+    - Se metadados forem fornecidos (METADATA não vazio), USE-OS COMO VERDADE ABSOLUTA
+    - Não altere, não invente, não "corrija" dados fornecidos nos metadados
+    - Metadados fornecidos têm prioridade sobre qualquer informação na transcrição
 
-2. **EXTRAÇÃO DA TRANSCRIÇÃO (quando metadados ausentes):**
-   - Se algum campo de metadados estiver vazio/null, EXTRAIA da transcrição:
-     * customer_name: nome do cliente mencionado nos diálogos
-     * banker_name: nome do banker/gerente mencionado
-     * meet_type: tipo da reunião inferido do contexto (ex: "Primeira Reunião", "Acompanhamento", "Fechamento")
-     * meet_date: data mencionada na transcrição (formato ISO 8601) ou use a data atual se não mencionada
-     * customer_id: se não identificável → deixe como "unknown" 
-     * banker_id: se não identificável → deixe como "unknown" 
-     * meeting_id: se não identificável → deixe como "unknown" 
+    2. **EXTRAÇÃO DA TRANSCRIÇÃO (quando metadados ausentes):**
+    - Se algum campo de metadados estiver vazio/null, EXTRAIA da transcrição:
+        * customer_name: nome do cliente mencionado nos diálogos
+        * banker_name: nome do banker/gerente mencionado
+        * meet_type: tipo da reunião inferido do contexto (ex: "Primeira Reunião", "Acompanhamento", "Fechamento")
+        * meet_date: data mencionada na transcrição (formato ISO 8601) ou use a data atual se não mencionada
+        * customer_id: se não identificável → deixe como "unknown" 
+        * banker_id: se não identificável → deixe como "unknown" 
+        * meeting_id: se não identificável → deixe como "unknown" 
 
-3. **CAMPOS SEMPRE EXTRAÍDOS DA TRANSCRIÇÃO:**
-   - summary: resumo executivo com EXATAMENTE 100-200 palavras
-   - key_points: lista de 3-7 pontos-chave da reunião
-   - action_items: lista de ações/tarefas identificadas
-   - topics: lista de 2-5 tópicos/assuntos principais
+    3. **CAMPOS SEMPRE EXTRAÍDOS DA TRANSCRIÇÃO:**
+    - summary: resumo executivo com EXATAMENTE 100-200 palavras
+    - key_points: lista de 3-7 pontos-chave da reunião
+    - action_items: lista de ações/tarefas identificadas
+    - topics: lista de 2-5 tópicos/assuntos principais
 
-4. **VALIDAÇÕES:**
-   - NÃO invente informações que não estão na transcrição
-   - NÃO deixe campos obrigatórios vazios (use "unknown" se necessário para IDs)
-   - Garanta que o summary tenha 100-200 palavras (conte as palavras!)
-   - Listas vazias são permitidas se realmente não houver informações
+    4. **VALIDAÇÕES:**
+    - NÃO invente informações que não estão na transcrição
+    - NÃO deixe campos obrigatórios vazios (use "unknown" se necessário para IDs)
+    - Garanta que o summary tenha 100-200 palavras (conte as palavras!)
+    - Listas vazias são permitidas se realmente não houver informações
 
-**FORMATO DE SAÍDA:**
-Retorne um JSON válido com os seguintes campos:
-- meeting_id: string (do metadata ou 'unknown')
-- customer_id: string (do metadata ou 'unknown')
-- customer_name: string (do metadata ou extraído da transcrição)
-- banker_id: string (do metadata ou 'unknown')
-- banker_name: string (do metadata ou extraído da transcrição)
-- meet_type: string (do metadata ou inferido)
-- meet_date: ISO 8601 datetime string (do metadata ou extraído/atual)
-- summary: string com 100-200 palavras exatas
-- key_points: array de strings
-- action_items: array de strings
-- topics: array de strings
-- source: sempre "lftm-challenge"
-- idempotency_key: sempre null (será preenchido externamente)
-- transcript_ref: sempre null
-- duration_sec: sempre null
+    **FORMATO DE SAÍDA:**
+    Retorne um JSON válido com os seguintes campos:
+    - meeting_id: string (do metadata ou 'unknown')
+    - customer_id: string (do metadata ou 'unknown')
+    - customer_name: string (do metadata ou extraído da transcrição)
+    - banker_id: string (do metadata ou 'unknown')
+    - banker_name: string (do metadata ou extraído da transcrição)
+    - meet_type: string (do metadata ou inferido)
+    - meet_date: ISO 8601 datetime string (do metadata ou extraído/atual)
+    - summary: string com 100-200 palavras exatas
+    - key_points: array de strings
+    - action_items: array de strings
+    - topics: array de strings
+    - source: sempre "lftm-challenge"
+    - idempotency_key: sempre null (será preenchido externamente)
+    - transcript_ref: sempre null
+    - duration_sec: sempre null
 
-Responda APENAS com o JSON válido, SEM TEXTO ADICIONAL."""),
-    
-    ("human", """TRANSCRIÇÃO:
-{transcript}
+    Responda APENAS com o JSON válido, SEM TEXTO ADICIONAL."""),
+        
+        ("human", """TRANSCRIÇÃO:
+    {transcript}
 
-METADATA FORNECIDO (use como verdade se não for vazio):
-{metadata_json}
+    METADATA FORNECIDO (use como verdade se não for vazio):
+    {metadata_json}
 
-Retorne o JSON extraído:""")
-])
+    Retorne o JSON extraído:""")
+    ])
 
 # Chain completa: prompt → LLM → parser JSON
 chain = prompt | llm | parser
@@ -300,6 +267,8 @@ Retorne o JSON corrigido:""")
     stop=stop_after_attempt(3),  # Máximo 3 tentativas (requisito do briefing)
     wait=wait_exponential(multiplier=0.5, min=0.5, max=5.0),  # Backoff: 0.5s, 1s, 2s
     retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),  # Log antes de cada retry
+    after=after_log(logger, logging.INFO),  # Log após última tentativa
 )
 async def extract_meeting_chain(
     normalized: NormalizedInput,
@@ -355,22 +324,41 @@ async def extract_meeting_chain(
     
     # Prepara metadados para o prompt
     metadata_json = _prepare_metadata_for_prompt(normalized)
+    metadata_fields_count = len(json.loads(metadata_json)) if metadata_json != '{}' else 0
     
-    # Chama o LLM (com retry automático via decorator)
+    logger.info(
+        f"[{request_id}] Preparando chamada à OpenAI | "
+        f"metadata_fields={metadata_fields_count} | "
+        f"transcript_preview={_sanitize_transcript_for_log(normalized.transcript, 100)}"
+    )
+    
+    # Chama o LLM (com retry automático via decorator @retry)
+    import time
+    llm_start = time.time()
+    retry_count = 0
+    
     try:
+        logger.info(f"[{request_id}] Chamando OpenAI API (attempt 1/3)...")
         raw_output = await chain.ainvoke({
             "transcript": normalized.transcript,
             "metadata_json": metadata_json
         })
         
+        llm_duration = time.time() - llm_start
         logger.info(
-            f"[{request_id}] LLM respondeu | "
-            f"output_keys={list(raw_output.keys()) if isinstance(raw_output, dict) else 'invalid'}"
+            f"[{request_id}] OpenAI API respondeu | "
+            f"duration={llm_duration:.2f}s | "
+            f"output_type={'dict' if isinstance(raw_output, dict) else type(raw_output).__name__} | "
+            f"output_keys={list(raw_output.keys()) if isinstance(raw_output, dict) else 'N/A'}"
         )
         
     except (RateLimitError, APITimeoutError, APIError) as e:
+        llm_duration = time.time() - llm_start
         logger.error(
-            f"[{request_id}] Erro na chamada ao LLM após retries: {type(e).__name__} - {str(e)[:200]}"
+            f"[{request_id}] FALHA após 3 tentativas de chamada à OpenAI | "
+            f"total_duration={llm_duration:.2f}s | "
+            f"error_type={type(e).__name__} | "
+            f"error_msg={str(e)[:200]}"
         )
         raise
     

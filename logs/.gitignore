@@ -1,0 +1,8 @@
+# Ignorar todos os arquivos de log
+*.log
+*.log.*
+
+# Manter a pasta versionada
+!.gitignore
+!.gitkeep
+

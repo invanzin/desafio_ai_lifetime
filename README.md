@@ -97,6 +97,30 @@ A documentação está organizada em **4 partes principais**, projetadas para se
 
 ---
 
+### 5️⃣ [Testes (Testing)](05-TESTING.md) ✨ **NOVO!**
+
+**O que você vai aprender:**
+- 🧪 Estrutura de testes (unitários e integração)
+- 📊 Cobertura de testes (44 testes, ~85%)
+- 🚀 Como rodar os testes
+- 📝 Boas práticas de testes
+- 🔧 Troubleshooting comum
+- 🎨 Logs bonitos nos testes
+
+**Ideal para:**
+- ✅ Entender o que está testado
+- ✅ Adicionar novos testes
+- ✅ Rodar testes específicos
+- ✅ Debugar testes que falham
+- ✅ Medir cobertura de código
+
+**Arquivos relacionados:**
+- `tests/unit/test_schemas.py` (20 testes)
+- `tests/unit/test_extractor.py` (11 testes)
+- `tests/integration/test_main_api.py` (15 testes)
+
+---
+
 
 ## 🔄 Fluxo de Requisição Completo
 
@@ -275,8 +299,11 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final:
 | `app/main.py` | 444 | API FastAPI, endpoints | [04-MAIN-API.md](04-MAIN-API.md) |
 | `app/models/schemas.py` | 614 | Validação de dados | [02-SCHEMAS.md](02-SCHEMAS.md) |
 | `app/extractors/extractor.py` | 432 | Extração com IA | [03-EXTRACTOR.md](03-EXTRACTOR.md) |
+| `tests/unit/test_schemas.py` | 349 | Testes de schemas | [05-TESTING.md](05-TESTING.md) |
+| `tests/unit/test_extractor.py` | 335 | Testes de extração | [05-TESTING.md](05-TESTING.md) |
+| `tests/integration/test_main_api.py` | 414 | Testes de API | [05-TESTING.md](05-TESTING.md) |
 
-**Total:** ~1.490 linhas de código (sem contar testes)
+**Total:** ~2.588 linhas (código + testes)
 
 ---
 

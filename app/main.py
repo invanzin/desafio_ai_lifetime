@@ -40,16 +40,18 @@ from app.models.schemas import (
 # Extractor principal
 from app.extractors.extractor import extract_meeting_chain
 
+# Configuração de logging centralizada
+from app.config.logging_config import setup_logging, get_logger
+
 
 # ============================================================================
 # CONFIGURAÇÃO DE LOGGING
 # ============================================================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Inicializa logging imediatamente (importante para testes)
+# O setup_logging será chamado novamente no lifespan se necessário
+setup_logging(log_level="INFO", console_output=True)
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -67,7 +69,7 @@ async def lifespan(app: FastAPI):
     - Carregar modelos em memória
     - Cleanup de recursos
     """
-    # Startup
+    # Startup - Logger já foi inicializado no módulo
     logger.info("🚀 Iniciando microserviço de extração de reuniões...")
     logger.info("✅ Pronto para receber requisições")
     
@@ -333,22 +335,50 @@ async def extract_meeting(
           }'
         ```
     """
+    import time
+    start_time = time.time()
     request_id = request.state.request_id
     
-    # Log início (sem PII completa)
+    # Log início - Identifica formato de entrada
+    if body.raw_meeting:
+        input_format = "raw_meeting"
+        has_metadata = True
+    elif body.metadata:
+        input_format = "transcript+metadata"
+        has_metadata = True
+    else:
+        input_format = "transcript_only"
+        has_metadata = False
+    
     logger.info(
-        f"[{request_id}] POST /extract | "
-        f"format={'raw_meeting' if body.raw_meeting else 'transcript+metadata'}"
+        f"[{request_id}] POST /extract received | "
+        f"format={input_format} | "
+        f"has_metadata={has_metadata}"
     )
     
     try:
         # 1. Normalizar input (converte ambos os formatos para NormalizedInput)
+        logger.info(f"[{request_id}] Iniciando normalização...")
         normalized = body.to_normalized()
         
+        # Log detalhes da normalização
+        metadata_fields = sum([
+            normalized.meeting_id is not None,
+            normalized.customer_id is not None,
+            normalized.customer_name is not None,
+            normalized.banker_id is not None,
+            normalized.banker_name is not None,
+            normalized.meet_type is not None,
+            normalized.meet_date is not None
+        ])
+        
         logger.info(
-            f"[{request_id}] Input normalizado | "
-            f"transcript_len={len(normalized.transcript)} | "
-            f"has_metadata={normalized.meeting_id is not None}"
+            f"[{request_id}] Normalização concluída | "
+            f"transcript_len={len(normalized.transcript)} chars | "
+            f"transcript_words={len(normalized.transcript.split())} words | "
+            f"metadata_fields={metadata_fields}/7 | "
+            f"meeting_id={normalized.meeting_id or 'will_extract'} | "
+            f"customer_id={normalized.customer_id or 'will_extract'}"
         )
         
         # 2. Chamar o extractor (LangChain + OpenAI)
@@ -357,10 +387,16 @@ async def extract_meeting(
             request_id=request_id
         )
         
-        # 3. Log sucesso
+        # 3. Log sucesso com duração
+        duration = time.time() - start_time
         logger.info(
             f"[{request_id}] Extração concluída com sucesso | "
+            f"duration={duration:.2f}s | "
             f"meeting_id={extracted.meeting_id} | "
+            f"summary_words={len(extracted.summary.split())} | "
+            f"key_points={len(extracted.key_points)} | "
+            f"action_items={len(extracted.action_items)} | "
+            f"topics={len(extracted.topics)} | "
             f"idempotency_key={extracted.idempotency_key[:16]}..."
         )
         
