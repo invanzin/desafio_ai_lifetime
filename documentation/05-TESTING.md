@@ -13,7 +13,7 @@
 
 ## 🎯 Visão Geral
 
-Este projeto possui **53 testes automatizados** organizados em 6 arquivos:
+Este projeto possui **58 testes automatizados** organizados em 7 arquivos:
 
 | Arquivo | Tipo | Testes | Tempo | Status |
 |---------|------|--------|-------|--------|
@@ -21,10 +21,13 @@ Este projeto possui **53 testes automatizados** organizados em 6 arquivos:
 | `test_extractor.py` | Unitário | 11 | ~4s | ✅ |
 | `test_main_api.py` | Integração | 15 | ~3s | ✅ |
 | `test_error_502.py` | Integração | 9 | ~4.5s | ✅ |
+| `test_rate_limiting.py` | Integração | 6 | ~68s | ✅ |
 | `test_api.py` | E2E | - | - | ⏭️ Skipped |
 | `test_challenge_audit.py` | Auditoria | - | - | Manual |
 
-**Total:** 53 testes | ~12s | ✅ 100% passando
+**Total:** 59 testes (29 unit + 30 integration) | ~80s | ✅ 100% passando
+
+**Nota:** O tempo total aumentou devido ao teste `test_rate_limit_resets_after_window` que valida o reset da janela de 60s.
 
 ### Ferramentas
 - `pytest` - Framework de testes
@@ -43,6 +46,7 @@ projeto/tests/
 └── integration/
     ├── test_main_api.py         # Endpoints HTTP (15 testes)
     ├── test_error_502.py        # Erros 502 Bad Gateway (9 testes)
+    ├── test_rate_limiting.py    # Rate Limiting (6 testes)
     ├── test_api.py              # E2E com OpenAI (skipped)
     └── test_challenge_audit.py  # Auditoria do briefing
 ```
@@ -232,7 +236,86 @@ pytest tests/integration/test_error_502.py -v
 
 ---
 
-### 3. `test_api.py` - Testes End-to-End (Skipped)
+### 3. `test_rate_limiting.py` - Rate Limiting (6 testes)
+
+**Localização:** `tests/integration/test_rate_limiting.py`  
+**Tempo de execução:** ~68s (devido ao teste de reset de janela)
+
+#### Propósito
+Valida que o rate limiting está funcionando corretamente, protegendo a API contra abuse e consumo excessivo de recursos.
+
+#### Configuração
+- **Limite:** 10 requisições por minuto por IP
+- **Tecnologia:** SlowAPI (extensão do FastAPI)
+- **Storage:** Memória (ideal para single-instance)
+- **Resposta:** 429 Too Many Requests quando excedido
+
+#### Lista de Testes
+
+| # | Nome do Teste | O que Valida |
+|---|---------------|--------------|
+| 1 | `test_rate_limit_allows_requests_within_limit` | 9 requisições consecutivas são aceitas (dentro do limite) |
+| 2 | `test_rate_limit_blocks_11th_request` | 11ª requisição retorna 429 Too Many Requests |
+| 3 | `test_rate_limit_response_structure` | Estrutura JSON da resposta 429 está correta |
+| 4 | `test_rate_limit_includes_retry_after_header` | Header `Retry-After` está presente na resposta 429 |
+| 5 | `test_rate_limit_resets_after_window` | Limite reseta após 60 segundos (aguarda 61s) |
+| 6 | `test_rate_limit_logs_when_exceeded` | Sistema loga quando limite é excedido |
+
+#### Estrutura de Resposta 429
+
+Quando o limite é excedido, a API retorna:
+
+```json
+{
+    "error": "rate_limit_exceeded",
+    "message": "Você excedeu o limite de requisições. Tente novamente em alguns instantes.",
+    "limit": "10 requisições por minuto",
+    "request_id": "uuid-v4"
+}
+```
+
+**Headers:**
+- `Retry-After: 60` - Segundos até poder tentar novamente
+
+#### Isolamento entre Testes
+
+A fixture `client` reseta o limiter antes de cada teste:
+
+```python
+@pytest.fixture
+def client():
+    from app.main import limiter
+    limiter.reset()  # Garante isolamento
+    return TestClient(app)
+```
+
+Isso evita que o contador persista entre testes.
+
+#### Logging
+
+Quando o limite é excedido, o sistema loga:
+
+```
+[request-id] Rate limit exceeded | ip=192.168.1.1 | limit=10/minute
+```
+
+#### Configuração
+
+Ajuste o limite via variável de ambiente:
+
+```bash
+# .env
+RATE_LIMIT_PER_MINUTE=10  # Padrão
+```
+
+#### Rodar testes
+```bash
+pytest tests/integration/test_rate_limiting.py -v
+```
+
+---
+
+### 4. `test_api.py` - Testes End-to-End (Skipped)
 
 **Localização:** `tests/integration/test_api.py`  
 **Tempo de execução:** ~60s (quando habilitado)
@@ -255,7 +338,7 @@ pytest tests/integration/test_api.py -v
 
 ---
 
-### 4. `test_challenge_audit.py` - Auditoria do Briefing (Script)
+### 5. `test_challenge_audit.py` - Auditoria do Briefing (Script)
 
 **Localização:** `tests/integration/test_challenge_audit.py`  
 **Tipo:** Script manual (não roda com pytest)
@@ -294,23 +377,25 @@ source venv/bin/activate  # Linux/Mac
 
 ```bash
 # Rodar TODOS os testes
-pytest tests/unit/ tests/integration/test_main_api.py tests/integration/test_error_502.py -v
+pytest tests/unit/ tests/integration/test_main_api.py tests/integration/test_error_502.py tests/integration/test_rate_limiting.py -v
 
 # Apenas unitários
 pytest tests/unit/ -v
 
 # Apenas integração
-pytest tests/integration/test_main_api.py tests/integration/test_error_502.py -v
+pytest tests/integration/test_main_api.py tests/integration/test_error_502.py tests/integration/test_rate_limiting.py -v
 
 # Rodar arquivo específico
 pytest tests/unit/test_schemas.py -v
 pytest tests/integration/test_error_502.py -v
+pytest tests/integration/test_rate_limiting.py -v
 
 # Rodar teste específico
 pytest tests/unit/test_schemas.py::test_extract_request_both_formats_fails -v
 
 # Por palavra-chave
 pytest -k "422" -v                    # Todos com "422"
+pytest -k "429" -v                    # Todos com "429" (rate limit)
 pytest -k "502" -v                    # Todos com "502"
 pytest -k "metadata" -v               # Todos com "metadata"
 
@@ -408,10 +493,10 @@ pytest tests/ --random-order
 
 | Métrica | Valor |
 |---------|-------|
-| **Total de Testes** | 53 |
-| **Testes Passando** | ✅ 53 (100%) |
-| **Tempo Total** | ~12s |
-| **Cobertura** | ~90% |
+| **Total de Testes** | 59 |
+| **Testes Passando** | ✅ 59 (100%) |
+| **Tempo Total** | ~80s |
+| **Cobertura** | ~92% |
 
 ### Arquivos de Teste
 
@@ -421,6 +506,7 @@ pytest tests/ --random-order
 | `test_extractor.py` | Unitário | 11 | Funções auxiliares |
 | `test_main_api.py` | Integração | 15 | Endpoints HTTP |
 | `test_error_502.py` | Integração | 9 | Erros 502 (mocks) |
+| `test_rate_limiting.py` | Integração | 6 | Rate Limiting 429 |
 | `test_api.py` | E2E | - | Skipped (OpenAI) |
 | `test_challenge_audit.py` | Script | - | Auditoria manual |
 
@@ -428,7 +514,7 @@ pytest tests/ --random-order
 
 ```bash
 # Rodar tudo
-pytest tests/unit/ tests/integration/test_main_api.py tests/integration/test_error_502.py -v
+pytest tests/unit/ tests/integration/test_main_api.py tests/integration/test_error_502.py tests/integration/test_rate_limiting.py -v
 
 # Apenas unitários
 pytest tests/unit/ -v
@@ -436,11 +522,15 @@ pytest tests/unit/ -v
 # Apenas erros 502
 pytest tests/integration/test_error_502.py -v
 
+# Apenas rate limiting
+pytest tests/integration/test_rate_limiting.py -v
+
 # Teste específico
 pytest tests/unit/test_schemas.py::test_extract_request_both_formats_fails -v
 
 # Por palavra-chave
 pytest -k "422" -v
+pytest -k "429" -v  # Rate limit
 pytest -k "502" -v
 ```
 

@@ -324,8 +324,12 @@ pip install -r requirements.txt
 
 Crie `.env`:
 ```
+# OpenAI Configuration
 OPENAI_API_KEY=sk-proj-xxxxxxxx
 OPENAI_MODEL=gpt-4o
+
+# Rate Limiting (opcional)
+RATE_LIMIT_PER_MINUTE=10  # Limite de requisições por IP
 ```
 
 ### 3. Inicie a API

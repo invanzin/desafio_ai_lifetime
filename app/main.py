@@ -19,6 +19,7 @@ Características:
 
 import uuid
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
@@ -26,6 +27,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+
+# Rate Limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # OpenAI exceptions para error handling
 from openai import RateLimitError, APITimeoutError, APIError
@@ -52,6 +58,21 @@ from app.config.logging_config import setup_logging, get_logger
 # O setup_logging será chamado novamente no lifespan se necessário
 setup_logging(log_level="INFO", console_output=True)
 logger = get_logger(__name__)
+
+
+# ============================================================================
+# CONFIGURAÇÃO DE RATE LIMITING
+# ============================================================================
+
+# Cria instância do Limiter para proteção contra abuse
+# - key_func: Usa IP do cliente para rastrear requisições
+# - default_limits: Sem limite global (definimos por endpoint)
+# - storage_uri: Usa memória (ideal para single-instance deployments)
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[],  # Sem limite global
+    storage_uri="memory://",  # Storage em memória
+)
 
 
 # ============================================================================
@@ -94,6 +115,13 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Adiciona o limiter ao estado da aplicação
+app.state.limiter = limiter
+
+# Adiciona exception handler padrão do SlowAPI
+# (Será sobrescrito pelo nosso handler customizado abaixo)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ============================================================================
@@ -173,6 +201,53 @@ async def validation_exception_handler(
     )
 
 
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exception_handler(
+    request: Request,
+    exc: RateLimitExceeded
+    ) -> JSONResponse:
+    """
+    Handler para erros de rate limiting (429 Too Many Requests).
+    
+    Retorna mensagem estruturada quando o cliente excede o limite de
+    requisições por minuto, incluindo o header Retry-After.
+    
+    Args:
+        request: Requisição HTTP que causou o erro
+        exc: Exceção de rate limit excedido
+    
+    Returns:
+        JSONResponse: Resposta 429 com detalhes do limite e Retry-After header
+    """
+    request_id = getattr(request.state, "request_id", "-")
+    client_ip = get_remote_address(request)
+    
+    # Obtém o limite configurado (padrão: 10/minute)
+    rate_limit = os.getenv("RATE_LIMIT_PER_MINUTE", "10")
+    
+    logger.warning(
+        f"[{request_id}] Rate limit exceeded | "
+        f"ip={client_ip} | "
+        f"limit={rate_limit}/minute"
+    )
+    
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "error": "rate_limit_exceeded",
+            "message": (
+                "Você excedeu o limite de requisições. "
+                "Tente novamente em alguns instantes."
+            ),
+            "limit": f"{rate_limit} requisições por minuto",
+            "request_id": request_id,
+        },
+        headers={
+            "Retry-After": "60"  # Segundos até poder tentar novamente
+        }
+    )
+
+
 @app.exception_handler(Exception)
 async def generic_exception_handler(
     request: Request,
@@ -247,6 +322,7 @@ async def health_check() -> Dict[str, str]:
     summary="Extrai informações estruturadas de uma transcrição",
     response_description="Informações estruturadas extraídas com sucesso"
     )
+@limiter.limit("10/minute")
 async def extract_meeting(
     request: Request,
     body: ExtractRequest # faz a validação pelo Pydantic do body

@@ -19,6 +19,11 @@ fastapi==0.115.0
 # para máximo desempenho.
 uvicorn[standard]==0.30.6
 
+# SlowAPI: Extensão do FastAPI para rate limiting (limitação de taxa de requisições).
+# Protege a API contra abuse, DDoS e consumo excessivo de recursos.
+# Usa storage em memória por padrão (ideal para single-instance deployments).
+slowapi==0.1.9
+
 # -----------------------------------------------------------------------------
 # Validação de Dados e Configurações
 # -----------------------------------------------------------------------------
