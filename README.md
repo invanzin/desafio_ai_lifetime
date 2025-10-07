@@ -6,6 +6,77 @@ Esta documentação foi criada para ajudá-lo a entender **cada aspecto** do sis
 
 ---
 
+## 🚀 Quick Start
+
+### 1️⃣ Configurar Variáveis de Ambiente
+
+Copie o arquivo de exemplo e configure suas credenciais:
+
+```bash
+# Linux/Mac
+cp env.example .env
+
+# Windows (PowerShell)
+copy env.example .env
+
+# Windows (CMD)
+copy env.example .env
+```
+
+**Edite o arquivo `.env` e preencha:**
+- `OPENAI_API_KEY` - sua chave da OpenAI (obrigatório)
+- `LANGCHAIN_API_KEY` - sua chave do LangSmith (opcional, para observabilidade)
+- `EXTRACTOR_PROMPT_HUB_NAME` - nome do seu prompt no LangChain Hub
+
+### 2️⃣ Instalar Dependências
+
+```bash
+# Criar ambiente virtual
+python -m venv venv
+
+# Ativar ambiente virtual
+# Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+
+# Linux/Mac
+source venv/bin/activate
+
+# Instalar dependências
+pip install -r requirements.txt
+```
+
+### 3️⃣ Executar a API
+
+```bash
+# Desenvolvimento (com reload automático)
+uvicorn app.main:app --reload --port 8000
+
+# Produção
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### 4️⃣ Testar
+
+```bash
+# Executar todos os testes
+pytest
+
+# Executar apenas testes unitários
+pytest tests/unit/ -v
+
+# Executar apenas testes de integração
+pytest tests/integration/ -v
+```
+
+### 5️⃣ Acessar Documentação Interativa
+
+Após iniciar a API, acesse:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+- Métricas Prometheus: http://localhost:8000/metrics
+
+---
+
 ## 📖 Estrutura da Documentação
 
 A documentação está organizada em **4 partes principais**, projetadas para serem lidas em sequência:
