@@ -28,10 +28,15 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
+from fastapi.responses import Response
+
 # Rate Limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+# Métricas Prometheus
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # OpenAI exceptions para error handling
 from openai import RateLimitError, APITimeoutError, APIError
@@ -49,6 +54,18 @@ from app.extractors.extractor import extract_meeting_chain
 # Configuração de logging centralizada
 from app.config.logging_config import setup_logging, get_logger
 
+# Importa coletores de métricas para registrá-los
+from app.metrics import collectors
+from app.metrics.collectors import (
+    record_rate_limit_exceeded,
+    record_http_request,
+    record_http_duration,
+    record_transcript_size,
+    record_meeting_extracted,
+    record_api_error,
+    extraction_duration_seconds,
+)
+
 
 # ============================================================================
 # CONFIGURAÇÃO DE LOGGING
@@ -56,7 +73,7 @@ from app.config.logging_config import setup_logging, get_logger
 
 # Inicializa logging imediatamente (importante para testes)
 # O setup_logging será chamado novamente no lifespan se necessário
-setup_logging(log_level="INFO", console_output=True)
+setup_logging(log_level="DEBUG", console_output=True)
 logger = get_logger(__name__)
 
 
@@ -116,6 +133,36 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# ============================================================================
+# CONFIGURAÇÃO DE MÉTRICAS PROMETHEUS
+# ============================================================================
+
+# Inicializa o instrumentador Prometheus
+instrumentator = Instrumentator(
+    should_group_status_codes=False,  # Mantém códigos de status específicos
+    should_ignore_untemplated=True,   # Ignora rotas não mapeadas
+    should_respect_env_var=True,      # Respeita ENABLE_METRICS env var
+    should_instrument_requests_inprogress=True,  # Métricas de requests em progresso
+    excluded_handlers=["/metrics"],   # Não instrumenta o próprio endpoint de métricas
+    env_var_name="ENABLE_METRICS",    # Nome da variável de ambiente (padrão: True)
+    inprogress_name="http_requests_inprogress",
+    inprogress_labels=True,
+)
+
+print("🔧 [DEBUG] Criando instrumentador Prometheus...")
+
+# Instrumenta a aplicação FastAPI
+instrumentator.instrument(app)
+print("✅ [DEBUG] Instrumentador aplicado à FastAPI!")
+
+# Expõe o endpoint /metrics
+instrumentator.expose(app, endpoint="/metrics", tags=["Monitoring"])
+print("✅ [DEBUG] Endpoint /metrics exposto!")
+
+# ============================================================================
+# CONFIGURAÇÃO DE RATE LIMITING
+# ============================================================================
+
 # Adiciona o limiter ao estado da aplicação
 app.state.limiter = limiter
 
@@ -129,9 +176,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ============================================================================
 
 @app.middleware("http")
-async def add_request_id(request: Request, call_next):
+async def add_request_id_and_metrics(request: Request, call_next):
     """
-    Middleware que adiciona um X-Request-ID único a cada requisição.
+    Middleware que adiciona Request-ID e registra métricas HTTP.
     
     Usado para correlação de logs e debugging. Se o cliente já enviar
     um X-Request-ID, ele é preservado; caso contrário, um novo UUID é gerado.
@@ -143,13 +190,45 @@ async def add_request_id(request: Request, call_next):
     Returns:
         Response: Resposta HTTP com header X-Request-ID
     """
+    import time
+    
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
     
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
+    # Captura início da requisição
+    start_time = time.time()
     
-    return response
+    try:
+        response = await call_next(request)
+        
+        # Registra métricas de sucesso
+        record_http_request(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code
+        )
+        record_http_duration(
+            method=request.method,
+            endpoint=request.url.path,
+            duration=time.time() - start_time
+        )
+        
+        response.headers["X-Request-ID"] = request_id
+        return response
+        
+    except Exception as e:
+        # Registra métricas de erro
+        record_http_request(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=500
+        )
+        record_http_duration(
+            method=request.method,
+            endpoint=request.url.path,
+            duration=time.time() - start_time
+        )
+        raise
 
 
 # ============================================================================
@@ -224,6 +303,10 @@ async def rate_limit_exception_handler(
     
     # Obtém o limite configurado (padrão: 10/minute)
     rate_limit = os.getenv("RATE_LIMIT_PER_MINUTE", "10")
+    
+    # Registra métrica de rate limit excedido
+    endpoint = request.url.path
+    record_rate_limit_exceeded(endpoint)
     
     logger.warning(
         f"[{request_id}] Rate limit exceeded | "
@@ -413,6 +496,7 @@ async def extract_meeting(
     """
     import time
     start_time = time.time()
+    http_start_time = time.time()  # Timer separado para métricas HTTP
     request_id = request.state.request_id
     
     # Log início - Identifica formato de entrada
@@ -427,7 +511,7 @@ async def extract_meeting(
         has_metadata = False
     
     logger.info(
-        f"[{request_id}] POST /extract received | "
+        f"[INCOMING] [{request_id}] POST /extract received | "
         f"format={input_format} | "
         f"has_metadata={has_metadata}"
     )
@@ -436,6 +520,10 @@ async def extract_meeting(
         # 1. Normalizar input (converte ambos os formatos para NormalizedInput)
         logger.info(f"[{request_id}] Iniciando normalização...")
         normalized = body.to_normalized()
+        
+        # Registra métrica do tamanho da transcrição
+        transcript_size = len(normalized.transcript.encode('utf-8'))
+        record_transcript_size(transcript_size)
         
         # Log detalhes da normalização
         metadata_fields = sum([
@@ -458,10 +546,17 @@ async def extract_meeting(
         )
         
         # 2. Chamar o extractor (LangChain + OpenAI)
+        # Timer para duração da extração
+        extraction_start = time.time()
+        
         extracted = await extract_meeting_chain(
             normalized=normalized,
             request_id=request_id
         )
+        
+        # Registra métrica de duração da extração
+        extraction_duration = time.time() - extraction_start
+        extraction_duration_seconds.observe(extraction_duration)
         
         # 3. Log sucesso com duração
         duration = time.time() - start_time
@@ -476,6 +571,15 @@ async def extract_meeting(
             f"idempotency_key={extracted.idempotency_key[:16]}..."
         )
         
+        # Registra métrica de reunião extraída com sucesso
+        source = "raw_meeting" if body.raw_meeting else "transcript"
+        meeting_type = extracted.meet_type or "Unknown"
+        record_meeting_extracted(source, meeting_type)
+        
+        # Registra métrica de duração HTTP total
+        http_duration = time.time() - http_start_time
+        record_http_duration("POST", "/extract", http_duration)
+        
         return extracted
     
     except (RateLimitError, APITimeoutError, APIError) as e:
@@ -485,6 +589,9 @@ async def extract_meeting(
             f"type={type(e).__name__} | "
             f"error={str(e)[:200]}"
         )
+        
+        # Registra métrica de erro 502
+        record_api_error("openai_communication_error", 502)
         
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -508,6 +615,9 @@ async def extract_meeting(
             f"errors={e.errors()}"
         )
         
+        # Registra métrica de erro 502
+        record_api_error("openai_invalid_response", 502)
+        
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={
@@ -528,6 +638,9 @@ async def extract_meeting(
             f"error={str(e)[:200]}"
         )
         
+        # Registra métrica de erro 500
+        record_api_error("internal_error", 500)
+        
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
@@ -536,6 +649,15 @@ async def extract_meeting(
                 "request_id": request_id,
             }
         )
+
+
+
+# ENDPOINT PARA DEBUG
+@app.get("/metrics", tags=["Debug"])
+async def debug_metrics():
+    """Endpoint para testar métricas"""
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # ============================================================================

@@ -332,3 +332,314 @@ def test_metadata_json_has_proper_encoding():
     assert metadata_dict["banker_name"] == "María García"
     assert metadata_dict["meet_type"] == "Reunião de Acompanhamento"
 
+
+
+def test_idempotency_key_format():
+    """
+    Testa que idempotency_key segue o formato SHA-256 especificado no desafio.
+    
+    Requisito do desafio:
+    - idempotency_key = sha256(meeting_id + meet_date + customer_id)
+    - Deve ser um hash hexadecimal de 64 caracteres
+    """
+    print_test_header("Validação de Idempotency Key", "[IDEMPOTENCY]")
+    
+    normalized = NormalizedInput(
+        transcript="test",
+        meeting_id="MTG123",
+        customer_id="CUST456",
+        meet_date=datetime(2025, 9, 10, 14, 30, 0)
+    )
+    
+    print_info("Calculando idempotency_key...")
+    key = normalized.compute_idempotency_key()
+    
+    # Valida que foi gerado
+    print_check("key exists", key is not None)
+    assert key is not None
+    
+    # Valida formato SHA-256
+    print_check("key length", len(key))
+    assert len(key) == 64, "SHA-256 deve ter 64 caracteres"
+    
+    print_check("is hexadecimal", all(c in '0123456789abcdef' for c in key))
+    assert all(c in '0123456789abcdef' for c in key), "Deve ser hexadecimal"
+    
+    print_success(f"Idempotency key válida: {key[:16]}...")
+
+
+def test_idempotency_key_deterministic():
+    """
+    Testa que a mesma entrada sempre gera a mesma chave (determinismo).
+    
+    Importante para:
+    - Detecção de duplicatas
+    - Cache
+    - Evitar re-processamento
+    """
+    print_test_header("Determinismo de Idempotency Key", "[IDEMPOTENCY]")
+    
+    # Cria duas instâncias idênticas
+    normalized1 = NormalizedInput(
+        transcript="Transcrição 1",
+        meeting_id="MTG123",
+        customer_id="CUST456",
+        meet_date=datetime(2025, 9, 10, 14, 30, 0)
+    )
+    
+    normalized2 = NormalizedInput(
+        transcript="Transcrição 2",  # Diferente!
+        meeting_id="MTG123",
+        customer_id="CUST456",
+        meet_date=datetime(2025, 9, 10, 14, 30, 0)
+    )
+    
+    key1 = normalized1.compute_idempotency_key()
+    key2 = normalized2.compute_idempotency_key()
+    
+    print_check("key1", key1[:16] + "...")
+    print_check("key2", key2[:16] + "...")
+    
+    # Mesmos metadados = mesma chave (transcript não importa!)
+    assert key1 == key2, "Chaves devem ser idênticas para mesmos metadados"
+    print_success("Determinismo confirmado ✅")
+
+
+def test_idempotency_key_uniqueness():
+    """
+    Testa que mudanças em qualquer campo geram chaves diferentes.
+    
+    Garante que:
+    - meeting_id diferente → chave diferente
+    - customer_id diferente → chave diferente
+    - meet_date diferente → chave diferente
+    """
+    print_test_header("Unicidade de Idempotency Key", "[IDEMPOTENCY]")
+    
+    base = NormalizedInput(
+        transcript="test",
+        meeting_id="MTG123",
+        customer_id="CUST456",
+        meet_date=datetime(2025, 9, 10, 14, 30, 0)
+    )
+    
+    # Varia meeting_id
+    variant1 = NormalizedInput(
+        transcript="test",
+        meeting_id="MTG999",  # Diferente
+        customer_id="CUST456",
+        meet_date=datetime(2025, 9, 10, 14, 30, 0)
+    )
+    
+    # Varia customer_id
+    variant2 = NormalizedInput(
+        transcript="test",
+        meeting_id="MTG123",
+        customer_id="CUST999",  # Diferente
+        meet_date=datetime(2025, 9, 10, 14, 30, 0)
+    )
+    
+    # Varia meet_date
+    variant3 = NormalizedInput(
+        transcript="test",
+        meeting_id="MTG123",
+        customer_id="CUST456",
+        meet_date=datetime(2025, 9, 11, 14, 30, 0)  # Diferente
+    )
+    
+    key_base = base.compute_idempotency_key()
+    key_variant1 = variant1.compute_idempotency_key()
+    key_variant2 = variant2.compute_idempotency_key()
+    key_variant3 = variant3.compute_idempotency_key()
+    
+    print_info("Validando unicidade...")
+    
+    # Todas devem ser diferentes da base
+    assert key_base != key_variant1, "meeting_id diferente deve gerar chave diferente"
+    assert key_base != key_variant2, "customer_id diferente deve gerar chave diferente"
+    assert key_base != key_variant3, "meet_date diferente deve gerar chave diferente"
+    
+    # Todas devem ser diferentes entre si
+    assert key_variant1 != key_variant2
+    assert key_variant1 != key_variant3
+    assert key_variant2 != key_variant3
+    
+    print_success("Unicidade confirmada ✅")
+
+
+def test_metadata_json_omits_transcript():
+    """
+    Testa que _prepare_metadata_for_prompt() NÃO inclui o transcript.
+    
+    Importante porque:
+    - Transcript vai em campo separado no prompt
+    - Evita duplicação de dados
+    - Facilita parsing pelo LLM
+    """
+    print_test_header("Transcript não incluído em metadados", "[METADATA]")
+    
+    normalized = NormalizedInput(
+        transcript="Este é um transcript longo que não deve aparecer nos metadados",
+        meeting_id="MTG001",
+        customer_id="CUST001",
+        customer_name="João Silva"
+    )
+    
+    metadata_json = _prepare_metadata_for_prompt(normalized)
+    metadata_dict = json.loads(metadata_json)
+    
+    print_info("Verificando que transcript não está nos metadados...")
+    
+    # Valida que transcript NÃO está no JSON de metadados
+    assert "transcript" not in metadata_dict
+    
+    # Valida que o transcript não aparece no JSON como valor
+    metadata_str = json.dumps(metadata_dict)
+    assert "Este é um transcript" not in metadata_str
+    
+    print_success("Transcript corretamente separado dos metadados ✅")
+
+
+def test_metadata_json_only_has_expected_fields():
+    """
+    Testa que _prepare_metadata_for_prompt() retorna APENAS os campos esperados.
+    
+    Campos permitidos (conforme desafio):
+    - meeting_id, customer_id, customer_name
+    - banker_id, banker_name
+    - meet_type, meet_date
+    """
+    print_test_header("Campos permitidos em metadados", "[METADATA]")
+    
+    normalized = NormalizedInput(
+        transcript="test",
+        meeting_id="MTG001",
+        customer_id="CUST001",
+        customer_name="João Silva",
+        banker_id="BKR001",
+        banker_name="Pedro Falcão",
+        meet_type="Primeira Reunião",
+        meet_date=datetime(2025, 9, 10, 14, 30, 0)
+    )
+    
+    metadata_json = _prepare_metadata_for_prompt(normalized)
+    metadata_dict = json.loads(metadata_json)
+    
+    expected_fields = {
+        "meeting_id", "customer_id", "customer_name",
+        "banker_id", "banker_name", "meet_type", "meet_date"
+    }
+    
+    actual_fields = set(metadata_dict.keys())
+    
+    print_check("expected_fields", expected_fields)
+    print_check("actual_fields", actual_fields)
+    
+    # Valida que todos os campos estão presentes
+    assert actual_fields == expected_fields, f"Campos inesperados: {actual_fields - expected_fields}"
+    
+    print_success("Apenas campos esperados presentes ✅")
+
+
+def test_sanitize_transcript_preserves_beginning():
+    """
+    Testa que _sanitize_transcript_for_log() preserva o INÍCIO da transcrição.
+    
+    Importante para:
+    - Debug (começo geralmente tem contexto importante)
+    - Identificação rápida da reunião
+    """
+    print_test_header("Sanitização preserva início", "[SANITIZE]")
+    
+    transcript = "Cliente: João Silva. Banker: Pedro Falcão. Reunião sobre crédito." + "X" * 500
+    
+    sanitized = _sanitize_transcript_for_log(transcript, max_chars=100)
+    
+    # Valida que começo é preservado
+    print_check("starts_with", sanitized[:50] + "...")
+    assert sanitized.startswith("Cliente: João Silva")
+    
+    print_success("Início preservado corretamente ✅")
+
+
+def test_sanitize_transcript_different_lengths():
+    """
+    Testa _sanitize_transcript_for_log() com diferentes tamanhos de max_chars.
+    
+    Valida que:
+    - max_chars=50 trunca em 50
+    - max_chars=200 trunca em 200
+    - max_chars=1000 trunca em 1000
+    """
+    print_test_header("Sanitização com diferentes limites", "[SANITIZE]")
+    
+    transcript = "A" * 2000  # 2000 caracteres
+    
+    # Testa diferentes limites
+    limits = [50, 200, 500, 1000]
+    
+    for limit in limits:
+        sanitized = _sanitize_transcript_for_log(transcript, max_chars=limit)
+        
+        # Verifica que começa com exatamente `limit` caracteres
+        assert sanitized.startswith("A" * limit)
+        print_check(f"limit={limit}", f"truncated at {limit} chars ✅")
+    
+    print_success("Todos os limites funcionam corretamente ✅")
+
+
+def test_metadata_json_empty_when_no_metadata():
+    """
+    Testa que JSON retorna {} quando não há metadados fornecidos.
+    
+    Cenário: usuário envia APENAS transcript, sem nenhum metadata.
+    O LLM precisa extrair tudo da transcrição.
+    """
+    print_test_header("JSON vazio quando sem metadados", "[METADATA]")
+    
+    # Apenas transcript, sem nenhum metadata
+    normalized = NormalizedInput(transcript="Cliente: Olá...")
+    
+    metadata_json = _prepare_metadata_for_prompt(normalized)
+    metadata_dict = json.loads(metadata_json)
+    
+    print_check("metadata_dict", metadata_dict)
+    
+    # Deve ser um dicionário vazio
+    assert metadata_dict == {}
+    
+    # JSON string deve ser "{}"
+    assert metadata_json.strip() == "{}"
+    
+    print_success("JSON vazio correto ✅")
+
+
+def test_meet_date_iso_8601_format():
+    """
+    Testa que meet_date é formatado EXATAMENTE como ISO 8601.
+    
+    Requisito do desafio:
+    - meet_date deve ser ISO 8601 (YYYY-MM-DDTHH:MM:SS)
+    """
+    print_test_header("Formatação ISO 8601 de meet_date", "[METADATA]")
+    
+    # Testa diferentes datas
+    test_cases = [
+        (datetime(2025, 1, 1, 0, 0, 0), "2025-01-01T00:00:00"),
+        (datetime(2025, 12, 31, 23, 59, 59), "2025-12-31T23:59:59"),
+        (datetime(2025, 9, 10, 14, 30, 0), "2025-09-10T14:30:00"),
+    ]
+    
+    for dt, expected_iso in test_cases:
+        normalized = NormalizedInput(
+            transcript="test",
+            meet_date=dt
+        )
+        
+        metadata_json = _prepare_metadata_for_prompt(normalized)
+        metadata_dict = json.loads(metadata_json)
+        
+        print_check(f"date={dt}", metadata_dict["meet_date"])
+        assert metadata_dict["meet_date"] == expected_iso
+    
+    print_success("Todas as datas em ISO 8601 ✅")

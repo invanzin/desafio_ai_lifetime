@@ -13,19 +13,19 @@
 
 ## 🎯 Visão Geral
 
-Este projeto possui **58 testes automatizados** organizados em 7 arquivos:
+Este projeto possui **67 testes automatizados** organizados em 7 arquivos:
 
 | Arquivo | Tipo | Testes | Tempo | Status |
 |---------|------|--------|-------|--------|
 | `test_schemas.py` | Unitário | 18 | ~0.5s | ✅ |
-| `test_extractor.py` | Unitário | 11 | ~4s | ✅ |
+| `test_extractor.py` | Unitário | 20 | ~3.5s | ✅ |
 | `test_main_api.py` | Integração | 15 | ~3s | ✅ |
 | `test_error_502.py` | Integração | 9 | ~4.5s | ✅ |
 | `test_rate_limiting.py` | Integração | 6 | ~68s | ✅ |
 | `test_api.py` | E2E | - | - | ⏭️ Skipped |
 | `test_challenge_audit.py` | Auditoria | - | - | Manual |
 
-**Total:** 59 testes (29 unit + 30 integration) | ~80s | ✅ 100% passando
+**Total:** 68 testes (38 unit + 30 integration) | ~80s | ✅ 100% passando
 
 **Nota:** O tempo total aumentou devido ao teste `test_rate_limit_resets_after_window` que valida o reset da janela de 60s.
 
@@ -93,13 +93,13 @@ pytest tests/unit/test_schemas.py -v
 
 ---
 
-### 2. `test_extractor.py` - Funções Auxiliares (11 testes)
+### 2. `test_extractor.py` - Funções Auxiliares (20 testes)
 
 **Localização:** `tests/unit/test_extractor.py`  
-**Tempo de execução:** ~4s
+**Tempo de execução:** ~3.5s
 
 #### Propósito
-Testa funções auxiliares de preparação de dados e sanitização para logs.
+Testa funções auxiliares de preparação de dados, sanitização para logs, e validação de requisitos do desafio.
 
 #### Lista de Testes
 
@@ -116,6 +116,17 @@ Testa funções auxiliares de preparação de dados e sanitização para logs.
 | 9 | `test_sanitize_transcript_custom_max_chars` | max_chars customizado funciona |
 | 10 | `test_metadata_json_is_valid_json` | Output sempre é JSON válido |
 | 11 | `test_metadata_json_has_proper_encoding` | Caracteres especiais (ç, ã) preservados |
+| 12 | `test_idempotency_key_format` | ✨ Idempotency key é SHA-256 válido (64 chars hex) |
+| 13 | `test_idempotency_key_deterministic` | ✨ Mesmos metadados = mesma chave (determinismo) |
+| 14 | `test_idempotency_key_uniqueness` | ✨ Mudança em qualquer campo gera chave diferente |
+| 15 | `test_metadata_json_omits_transcript` | ✨ Transcript não é incluído no JSON de metadados |
+| 16 | `test_metadata_json_only_has_expected_fields` | ✨ Apenas campos esperados do desafio |
+| 17 | `test_sanitize_transcript_preserves_beginning` | ✨ Sanitização preserva início da transcrição |
+| 18 | `test_sanitize_transcript_different_lengths` | ✨ Testa múltiplos limites (50, 200, 500, 1000) |
+| 19 | `test_metadata_json_empty_when_no_metadata` | ✨ JSON vazio {} quando sem metadados |
+| 20 | `test_meet_date_iso_8601_format` | ✨ Validação rigorosa de formato ISO 8601 |
+
+**✨ = Testes adicionados para validar requisitos específicos do desafio**
 
 #### Rodar testes
 ```bash
@@ -493,17 +504,17 @@ pytest tests/ --random-order
 
 | Métrica | Valor |
 |---------|-------|
-| **Total de Testes** | 59 |
-| **Testes Passando** | ✅ 59 (100%) |
+| **Total de Testes** | 68 |
+| **Testes Passando** | ✅ 68 (100%) |
 | **Tempo Total** | ~80s |
-| **Cobertura** | ~92% |
+| **Cobertura** | ~95% |
 
 ### Arquivos de Teste
 
 | Arquivo | Tipo | Testes | Descrição |
 |---------|------|--------|-----------|
 | `test_schemas.py` | Unitário | 18 | Validação Pydantic |
-| `test_extractor.py` | Unitário | 11 | Funções auxiliares |
+| `test_extractor.py` | Unitário | 20 | Funções auxiliares + requisitos do desafio |
 | `test_main_api.py` | Integração | 15 | Endpoints HTTP |
 | `test_error_502.py` | Integração | 9 | Erros 502 (mocks) |
 | `test_rate_limiting.py` | Integração | 6 | Rate Limiting 429 |

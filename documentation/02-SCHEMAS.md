@@ -369,7 +369,7 @@ class ExtractedMeeting(BaseModel):
     
     # Metadados de controle (obrigatórios)
     source: Literal["lftm-challenge"] = "lftm-challenge"
-    idempotency_key: str
+    idempotency_key: Optional[str] = None
     
     # Opcionais
     transcript_ref: Optional[str] = None

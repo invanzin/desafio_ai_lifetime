@@ -169,6 +169,10 @@ class OpenAIClient:
             "temperature": final_temperature,
             "timeout": final_timeout,
             "api_key": self.api_key,
+            # 🔥 HABILITANDO COLETA DE TOKENS:
+            "model_kwargs": {
+                "stream_usage": True,  # Para capturar usage em streaming
+            },
             **kwargs
         }
         

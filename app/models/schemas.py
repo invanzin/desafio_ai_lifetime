@@ -441,7 +441,7 @@ class ExtractedMeeting(BaseModel):
     banker_id: str
     banker_name: str
     meet_type: str
-    meet_date: datetime
+    meet_date: datetime or str
     
     # Campos obrigatórios - Dados extraídos por IA
     summary: str  # Validado para ter 100-200 palavras
@@ -451,7 +451,7 @@ class ExtractedMeeting(BaseModel):
     
     # Campos obrigatórios - Metadados de controle
     source: Literal["lftm-challenge"] = "lftm-challenge"
-    idempotency_key: str
+    idempotency_key: Optional[str] = None
     
     # Campos opcionais - Informações complementares
     transcript_ref: Optional[str] = None

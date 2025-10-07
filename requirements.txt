@@ -24,6 +24,10 @@ uvicorn[standard]==0.30.6
 # Usa storage em memória por padrão (ideal para single-instance deployments).
 slowapi==0.1.9
 
+# Métricas
+prometheus-client==0.20.0
+prometheus-fastapi-instrumentator==7.0.0
+
 # -----------------------------------------------------------------------------
 # Validação de Dados e Configurações
 # -----------------------------------------------------------------------------
@@ -51,7 +55,7 @@ structlog==24.4.0
 
 # Langchain: Framework para desenvolvimento de aplicações com modelos de linguagem (LLMs).
 # Facilita a criação de chains, prompts, memory e integrações com diversos LLMs.
-langchain==0.3.2
+langchain==0.2.1
 
 # Langchain OpenAI: Integração do Langchain com os modelos da OpenAI (GPT-3.5, GPT-4, etc).
 # Fornece wrappers e utilidades específicas para uso dos modelos OpenAI.
@@ -92,3 +96,7 @@ pytest-asyncio==0.24.0
 # Pytest Mock: Plugin do Pytest que simplifica a criação de mocks e stubs nos testes,
 # integrando a biblioteca unittest.mock com fixtures do pytest.
 pytest-mock==3.14.0
+
+# LangSmith: Plataforma de observabilidade e debugging para aplicações LLM.
+# Permite rastreamento de traces, métricas de performance, custos e debugging visual.
+langsmith==0.1.30
