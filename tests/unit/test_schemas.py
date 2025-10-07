@@ -8,13 +8,8 @@ import pytest
 from datetime import datetime
 from pydantic import ValidationError
 
-from app.models.schemas import (
-    Metadata,
-    RawMeeting,
-    ExtractRequest,
-    NormalizedInput,
-    ExtractedMeeting,
-)
+from app.models.schemas_common import Metadata, RawMeeting, NormalizedInput
+from app.models.schemas_extract import ExtractRequest, ExtractedMeeting
 
 
 # ============================================================================

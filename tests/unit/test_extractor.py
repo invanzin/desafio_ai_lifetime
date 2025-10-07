@@ -9,7 +9,7 @@ import pytest
 import json
 from datetime import datetime
 
-from app.models.schemas import NormalizedInput
+from app.models.schemas_common import NormalizedInput
 from app.extractors.extractor import _prepare_metadata_for_prompt, _sanitize_transcript_for_log
 
 

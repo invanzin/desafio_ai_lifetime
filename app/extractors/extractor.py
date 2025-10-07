@@ -45,7 +45,8 @@ from openai import RateLimitError, APITimeoutError, APIError
 import logging
 
 # Schemas internos
-from app.models.schemas import NormalizedInput, ExtractedMeeting
+from app.models.schemas_common import NormalizedInput
+from app.models.schemas_extract import ExtractedMeeting
 
 from llm.openai_client import default_client
 

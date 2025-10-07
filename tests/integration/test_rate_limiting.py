@@ -55,7 +55,7 @@ def test_rate_limit_allows_requests_within_limit(client):
     """
     # Mock do extractor para evitar chamadas à OpenAI
     with patch('app.main.extract_meeting_chain') as mock_extract:
-        from app.models.schemas import ExtractedMeeting
+        from app.models.schemas_extract import ExtractedMeeting
         from datetime import datetime
         
         # Mock da resposta
@@ -97,7 +97,7 @@ def test_rate_limit_blocks_11th_request(client):
     - 11ª requisição: 429 Too Many Requests
     """
     with patch('app.main.extract_meeting_chain') as mock_extract:
-        from app.models.schemas import ExtractedMeeting
+        from app.models.schemas_extract import ExtractedMeeting
         from datetime import datetime
         
         mock_extract.return_value = ExtractedMeeting(
@@ -144,7 +144,7 @@ def test_rate_limit_response_structure(client):
     }
     """
     with patch('app.main.extract_meeting_chain') as mock_extract:
-        from app.models.schemas import ExtractedMeeting
+        from app.models.schemas_extract import ExtractedMeeting
         from datetime import datetime
         
         mock_extract.return_value = ExtractedMeeting(
@@ -202,7 +202,7 @@ def test_rate_limit_includes_retry_after_header(client):
     antes de tentar novamente.
     """
     with patch('app.main.extract_meeting_chain') as mock_extract:
-        from app.models.schemas import ExtractedMeeting
+        from app.models.schemas_extract import ExtractedMeeting
         from datetime import datetime
         
         mock_extract.return_value = ExtractedMeeting(
@@ -257,7 +257,7 @@ def test_rate_limit_resets_after_window(client):
     - Pode fazer mais 10 requisições
     """
     with patch('app.main.extract_meeting_chain') as mock_extract:
-        from app.models.schemas import ExtractedMeeting
+        from app.models.schemas_extract import ExtractedMeeting
         from datetime import datetime
         
         mock_extract.return_value = ExtractedMeeting(
@@ -310,7 +310,7 @@ def test_rate_limit_logs_when_exceeded(client, caplog):
     - Mensagem indicando rate limit exceeded
     """
     with patch('app.main.extract_meeting_chain') as mock_extract:
-        from app.models.schemas import ExtractedMeeting
+        from app.models.schemas_extract import ExtractedMeeting
         from datetime import datetime
         
         mock_extract.return_value = ExtractedMeeting(

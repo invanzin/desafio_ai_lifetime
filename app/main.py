@@ -42,11 +42,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from openai import RateLimitError, APITimeoutError, APIError
 
 # Schemas de validação
-from app.models.schemas import (
-    ExtractRequest,
-    ExtractedMeeting,
-    NormalizedInput,
-)
+from app.models.schemas_common import NormalizedInput
+from app.models.schemas_extract import ExtractRequest, ExtractedMeeting
 
 # Extractor principal
 from app.extractors.extractor import extract_meeting_chain
