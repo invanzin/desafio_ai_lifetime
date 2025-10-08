@@ -276,29 +276,63 @@ projeto/
 │   ├── __init__.py               # Inicialização do pacote
 │   ├── main.py                   # ⭐ API FastAPI (endpoints)
 │   │
+│   ├── config/                   # Configurações
+│   │   ├── __init__.py
+│   │   └── logging_config.py     # Configuração de logging
+│   │
 │   ├── models/                   # Modelos de dados
 │   │   ├── __init__.py
-│   │   └── schemas.py            # ⭐ Schemas Pydantic (validação)
+│   │   ├── schemas_common.py     # ⭐ Schemas compartilhados
+│   │   ├── schemas_extract.py    # ⭐ Schemas do Extractor
+│   │   └── schemas_analyze.py    # ⭐ Schemas do Analyzer
 │   │
-│   └── extractors/               # Lógica de extração
+│   ├── extractors/               # Feature: Extractor
+│   │   ├── __init__.py
+│   │   └── extractor.py          # ⭐ LangChain + OpenAI
+│   │
+│   ├── analyzers/                # Feature: Analyzer
+│   │   ├── __init__.py
+│   │   └── analyzer.py           # Análise de sentimento
+│   │
+│   ├── routers/                  # Routers FastAPI
+│   │   ├── __init__.py
+│   │   ├── extract.py            # Endpoint /extract
+│   │   └── analyze.py            # Endpoint /analyze
+│   │
+│   └── metrics/                  # Métricas Prometheus
 │       ├── __init__.py
-│       └── extractor.py          # ⭐ LangChain + OpenAI (processamento)
+│       ├── collectors.py         # Coletores de métricas
+│       └── dashboard.py          # Dashboard Grafana
+│
+├── llm/                          # Cliente OpenAI
+│   ├── __init__.py
+│   └── openai_client.py          # Wrapper do OpenAI
 │
 ├── tests/                        # Testes (TODO)
 │   ├── unit/
 │   └── integration/
 │
 ├── documentation/                # Documentação completa
-│   ├── 01-OVERVIEW.md            # Este arquivo (visão geral)
+│   ├── 01-OVERVIEW-EXTRACTOR.md  # Este arquivo (visão geral)
 │   ├── 02-SCHEMAS.md             # Documentação dos schemas
 │   ├── 03-EXTRACTOR.md           # Documentação do extractor
-│   └── 04-MAIN-API.md            # Documentação da API
+│   ├── 04-MAIN-API.md            # Documentação da API
+│   ├── 05-TESTING.md             # Documentação de testes
+│   ├── 06-METRICS.md             # Métricas Prometheus
+│   └── DOCKER.md                 # Deploy com Docker
+│
+├── logs/                         # Logs da aplicação
+│   ├── info.log                  # Logs nível INFO
+│   ├── debug.log                 # Logs nível DEBUG
+│   └── error.log                 # Logs nível ERROR
 │
 ├── .env                          # Variáveis de ambiente (não commitado)
+├── env.example                   # Template de variáveis (commitado)
 ├── .gitignore                    # Arquivos ignorados pelo git
 ├── requirements.txt              # Dependências Python
-├── test_api.py                   # Script de teste manual
-├── CONCEPTS.md                   # Conceitos (Request ID vs Idempotency)
+├── pytest.ini                    # Configuração do pytest
+├── Dockerfile                    # Docker build
+├── docker-compose.yml            # Orquestração Docker
 │
 └── README.md                     # Guia rápido de uso
 ```
@@ -307,9 +341,12 @@ projeto/
 
 | Arquivo | Responsabilidade | Linhas |
 |---------|------------------|--------|
-| `main.py` | API FastAPI, endpoints, error handling | ~444 |
-| `schemas.py` | Validação de dados, normalização | ~614 |
-| `extractor.py` | LangChain, OpenAI, retry, reparo | ~432 |
+| `main.py` | API FastAPI, endpoints, error handling | ~678 |
+| `schemas_common.py` | Schemas compartilhados (Extractor + Analyzer) | ~391 |
+| `schemas_extract.py` | Schemas do Extractor | ~146 |
+| `schemas_analyze.py` | Schemas do Analyzer | ~136 |
+| `extractor.py` | Feature Extractor: LangChain, OpenAI, retry | ~541 |
+| `analyzer.py` | Feature Analyzer: Análise de sentimento | ~53 |
 
 ---
 
@@ -330,26 +367,35 @@ cd projeto
 # 2. Crie ambiente virtual
 python -m venv venv
 
-# 3. Ative o ambiente (Windows)
-.\venv\Scripts\activate
+# 3. Ative o ambiente
+# Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+
+# Linux/Mac
+source venv/bin/activate
 
 # 4. Instale dependências
 pip install -r requirements.txt
 
 # 5. Configure variáveis de ambiente
-# Crie arquivo .env na raiz do projeto
-echo OPENAI_API_KEY=sk-proj-xxxxxxxx > .env
-echo OPENAI_MODEL=gpt-4o >> .env
+# Copie o arquivo de exemplo
+copy env.example .env  # Windows
+# cp env.example .env  # Linux/Mac
+
+# 6. Edite o arquivo .env e preencha:
+# - OPENAI_API_KEY=sk-proj-your-real-key
+# - EXTRACTOR_PROMPT_HUB_NAME=ivan-furukawa/extrator-reunioes-bancarias
+# - LANGCHAIN_API_KEY=ls__your-key (opcional)
 ```
 
 ### Executando a API
 
 ```bash
 # Modo desenvolvimento (com hot reload)
-python -m app.main
+uvicorn app.main:app --reload --port 8000
 
-# Ou usando uvicorn diretamente
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Ou usando o entrypoint do Python
+python -m app.main
 
 # Modo produção (múltiplos workers)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
@@ -409,7 +455,7 @@ curl -X POST http://localhost:8000/extract \
 | **Python-dotenv** | 1.0.1 | Carregamento de variáveis de ambiente |
 | **HTTPX** | 0.27.2 | Cliente HTTP assíncrono |
 
-### Testing (TODO)
+### Testing
 
 | Tecnologia | Versão | Uso |
 |------------|--------|-----|
@@ -632,9 +678,11 @@ else:
 
 Para entender melhor cada componente, consulte:
 
-- **[Schemas](02-SCHEMAS.md)** - Detalhes sobre validação de dados
+- **[Schemas](02-SCHEMAS.md)** - Detalhes sobre validação de dados (schemas_common, schemas_extract, schemas_analyze)
 - **[Extractor](03-EXTRACTOR.md)** - Como funciona a extração com IA
 - **[Main API](04-MAIN-API.md)** - Documentação dos endpoints
+- **[Testing](05-TESTING.md)** - Como rodar e criar testes
+- **[Metrics](06-METRICS.md)** - Métricas Prometheus e observabilidade
 
 ---
 

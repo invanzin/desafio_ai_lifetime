@@ -355,7 +355,7 @@ pytest tests/integration/test_api.py -v
 **Tipo:** Script manual (não roda com pytest)
 
 #### Propósito
-Valida se a API atende TODOS os requisitos do briefing do Desafio 1.
+Valida se a API atende TODOS os requisitos do briefing da Feature Extractor.
 
 #### O que valida
 1. **Health Check** - Serviço está online

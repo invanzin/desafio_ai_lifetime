@@ -81,7 +81,7 @@ Após iniciar a API, acesse:
 
 A documentação está organizada em **4 partes principais**, projetadas para serem lidas em sequência:
 
-### 1️⃣ [Visão Geral (OVERVIEW)](01-OVERVIEW.md)
+### 1️⃣ [Visão Geral (OVERVIEW)](documentation/01-OVERVIEW-EXTRACTOR.md)
 
 **O que você vai aprender:**
 - 🎯 O que o microserviço faz
@@ -99,7 +99,7 @@ A documentação está organizada em **4 partes principais**, projetadas para se
 
 ---
 
-### 2️⃣ [Schemas (Validação de Dados)](02-SCHEMAS.md)
+### 2️⃣ [Schemas (Validação de Dados)](documentation/02-SCHEMAS.md)
 
 **O que você vai aprender:**
 - 📋 O que são schemas Pydantic
@@ -117,11 +117,13 @@ A documentação está organizada em **4 partes principais**, projetadas para se
 - ✅ Debugar erros de validação
 
 **Arquivos relacionados:**
-- `app/models/schemas.py` (614 linhas)
+- `app/models/schemas_common.py` - Schemas compartilhados
+- `app/models/schemas_extract.py` - Schemas do Extractor
+- `app/models/schemas_analyze.py` - Schemas do Analyzer
 
 ---
 
-### 3️⃣ [Extractor (Processamento com IA)](03-EXTRACTOR.md)
+### 3️⃣ [Extractor (Processamento com IA)](documentation/03-EXTRACTOR.md)
 
 **O que você vai aprender:**
 - 🤖 Como funciona o LangChain
@@ -145,7 +147,7 @@ A documentação está organizada em **4 partes principais**, projetadas para se
 
 ---
 
-### 4️⃣ [Main API (Endpoints FastAPI)](04-MAIN-API.md)
+### 4️⃣ [Main API (Endpoints FastAPI)](documentation/04-MAIN-API.md)
 
 **O que você vai aprender:**
 - 🌐 Arquitetura FastAPI em camadas
@@ -168,7 +170,7 @@ A documentação está organizada em **4 partes principais**, projetadas para se
 
 ---
 
-### 5️⃣ [Testes (Testing)](05-TESTING.md) ✨ **NOVO!**
+### 5️⃣ [Testes (Testing)](documentation/05-TESTING.md) ✨ **NOVO!**
 
 **O que você vai aprender:**
 - 🧪 Estrutura de testes (unitários e integração)
@@ -286,13 +288,15 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final:
 ```
 📚 README.md (você está aqui)
     │
-    ├─► 01-OVERVIEW.md ◄─ Comece aqui!
+    ├─► documentation/01-OVERVIEW-EXTRACTOR.md ◄─ Comece aqui!
     │       ↓
-    ├─► 02-SCHEMAS.md (Validação de dados)
+    ├─► documentation/02-SCHEMAS.md (Validação de dados)
     │       ↓
-    ├─► 03-EXTRACTOR.md (Processamento com IA)
+    ├─► documentation/03-EXTRACTOR.md (Processamento com IA)
     │       ↓
-    └─► 04-MAIN-API.md (Endpoints HTTP)
+    ├─► documentation/04-MAIN-API.md (Endpoints HTTP)
+    │       ↓
+    └─► documentation/05-TESTING.md (Testes)
 ```
 
 ---
@@ -302,7 +306,7 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final:
 ### 👨‍💼 Gerente / Product Owner
 
 **Leia:**
-1. [01-OVERVIEW.md](01-OVERVIEW.md) - Seções: "Visão Geral" e "Fluxo de Dados"
+1. [01-OVERVIEW-EXTRACTOR.md](documentation/01-OVERVIEW-EXTRACTOR.md) - Seções: "Visão Geral" e "Fluxo de Dados"
 
 **Tempo estimado:** 10 minutos
 
@@ -316,10 +320,11 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final:
 ### 👨‍💻 Desenvolvedor (Backend)
 
 **Leia em ordem:**
-1. [01-OVERVIEW.md](01-OVERVIEW.md) - Completo
-2. [02-SCHEMAS.md](02-SCHEMAS.md) - Completo
-3. [03-EXTRACTOR.md](03-EXTRACTOR.md) - Completo
-4. [04-MAIN-API.md](04-MAIN-API.md) - Completo
+1. [01-OVERVIEW-EXTRACTOR.md](documentation/01-OVERVIEW-EXTRACTOR.md) - Completo
+2. [02-SCHEMAS.md](documentation/02-SCHEMAS.md) - Completo
+3. [03-EXTRACTOR.md](documentation/03-EXTRACTOR.md) - Completo
+4. [04-MAIN-API.md](documentation/04-MAIN-API.md) - Completo
+5. [05-TESTING.md](documentation/05-TESTING.md) - Completo
 
 **Tempo estimado:** 60-90 minutos
 
@@ -334,8 +339,9 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final:
 ### 🧪 QA / Tester
 
 **Leia:**
-1. [01-OVERVIEW.md](01-OVERVIEW.md) - Seções: "Visão Geral" e "Como Iniciar"
-2. [04-MAIN-API.md](04-MAIN-API.md) - Seções: "Endpoints" e "Exemplos Práticos"
+1. [01-OVERVIEW-EXTRACTOR.md](documentation/01-OVERVIEW-EXTRACTOR.md) - Seções: "Visão Geral" e "Como Iniciar"
+2. [04-MAIN-API.md](documentation/04-MAIN-API.md) - Seções: "Endpoints" e "Exemplos Práticos"
+3. [05-TESTING.md](documentation/05-TESTING.md) - Como rodar os testes
 
 **Tempo estimado:** 20 minutos
 
@@ -349,9 +355,9 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final:
 ### 🎨 Frontend Developer
 
 **Leia:**
-1. [01-OVERVIEW.md](01-OVERVIEW.md) - Seção: "Visão Geral"
-2. [02-SCHEMAS.md](02-SCHEMAS.md) - Seções: "Schemas de Entrada" e "Schema de Saída"
-3. [04-MAIN-API.md](04-MAIN-API.md) - Seções: "Endpoints" e "Exemplos Práticos"
+1. [01-OVERVIEW-EXTRACTOR.md](documentation/01-OVERVIEW-EXTRACTOR.md) - Seção: "Visão Geral"
+2. [02-SCHEMAS.md](documentation/02-SCHEMAS.md) - Seções: "Schemas de Entrada" e "Schema de Saída"
+3. [04-MAIN-API.md](documentation/04-MAIN-API.md) - Seções: "Endpoints" e "Exemplos Práticos"
 
 **Tempo estimado:** 30 minutos
 
@@ -367,62 +373,16 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final:
 
 | Arquivo | Linhas | Responsabilidade | Documentação |
 |---------|--------|------------------|--------------|
-| `app/main.py` | 444 | API FastAPI, endpoints | [04-MAIN-API.md](04-MAIN-API.md) |
-| `app/models/schemas.py` | 614 | Validação de dados | [02-SCHEMAS.md](02-SCHEMAS.md) |
-| `app/extractors/extractor.py` | 432 | Extração com IA | [03-EXTRACTOR.md](03-EXTRACTOR.md) |
-| `tests/unit/test_schemas.py` | 349 | Testes de schemas | [05-TESTING.md](05-TESTING.md) |
-| `tests/unit/test_extractor.py` | 335 | Testes de extração | [05-TESTING.md](05-TESTING.md) |
-| `tests/integration/test_main_api.py` | 414 | Testes de API | [05-TESTING.md](05-TESTING.md) |
+| `app/main.py` | ~678 | API FastAPI, endpoints | [04-MAIN-API.md](documentation/04-MAIN-API.md) |
+| `app/models/schemas_common.py` | ~391 | Schemas compartilhados | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) |
+| `app/models/schemas_extract.py` | ~146 | Schemas do Extractor | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) |
+| `app/models/schemas_analyze.py` | ~136 | Schemas do Analyzer | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) |
+| `app/extractors/extractor.py` | ~541 | Extração com IA | [03-EXTRACTOR.md](documentation/03-EXTRACTOR.md) |
+| `tests/unit/test_schemas.py` | ~344 | Testes de schemas | [05-TESTING.md](documentation/05-TESTING.md) |
+| `tests/unit/test_extractor.py` | ~646 | Testes de extração | [05-TESTING.md](documentation/05-TESTING.md) |
+| `tests/integration/test_main_api.py` | ~351 | Testes de API | [05-TESTING.md](documentation/05-TESTING.md) |
 
-**Total:** ~2.588 linhas (código + testes)
-
----
-
-## 🚀 Quick Start
-
-Se você quer **começar rápido**, siga estes passos:
-
-### 1. Configure o ambiente
-
-```bash
-cd projeto
-python -m venv venv
-.\venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-```
-
-### 2. Configure a API Key
-
-Crie `.env`:
-```
-# OpenAI Configuration
-OPENAI_API_KEY=sk-proj-xxxxxxxx
-OPENAI_MODEL=gpt-4o
-
-# Rate Limiting (opcional)
-RATE_LIMIT_PER_MINUTE=10  # Limite de requisições por IP
-```
-
-### 3. Inicie a API
-
-```bash
-python -m app.main
-```
-
-### 4. Teste
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Extração
-python test_api.py
-```
-
-### 5. Explore a documentação
-
-- **Swagger:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
+**Total:** ~3.233 linhas (código + testes)
 
 ---
 
@@ -432,12 +392,12 @@ python test_api.py
 
 | Tarefa | Onde Encontrar |
 |--------|----------------|
-| Adicionar novo campo na saída | [02-SCHEMAS.md](02-SCHEMAS.md) → `ExtractedMeeting` |
-| Modificar o prompt da IA | [03-EXTRACTOR.md](03-EXTRACTOR.md) → "Prompt System" |
-| Adicionar novo endpoint | [04-MAIN-API.md](04-MAIN-API.md) → "Endpoints" |
-| Entender erros de validação | [02-SCHEMAS.md](02-SCHEMAS.md) → "Exemplos Práticos" |
-| Debugar erro de extração | [03-EXTRACTOR.md](03-EXTRACTOR.md) → "Debugging" |
-| Customizar tratamento de erro | [04-MAIN-API.md](04-MAIN-API.md) → "Exception Handlers" |
+| Adicionar novo campo na saída | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) → `ExtractedMeeting` |
+| Modificar o prompt da IA | [03-EXTRACTOR.md](documentation/03-EXTRACTOR.md) → "Prompt System" |
+| Adicionar novo endpoint | [04-MAIN-API.md](documentation/04-MAIN-API.md) → "Endpoints" |
+| Entender erros de validação | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) → "Exemplos Práticos" |
+| Debugar erro de extração | [03-EXTRACTOR.md](documentation/03-EXTRACTOR.md) → "Debugging" |
+| Customizar tratamento de erro | [04-MAIN-API.md](documentation/04-MAIN-API.md) → "Exception Handlers" |
 
 ---
 
@@ -512,5 +472,5 @@ Após ler a documentação, você pode:
 
 **Boa leitura! 📚**
 
-**Comece aqui:** [01-OVERVIEW.md](01-OVERVIEW.md)
+**Comece aqui:** [01-OVERVIEW-EXTRACTOR.md](documentation/01-OVERVIEW-EXTRACTOR.md)
 

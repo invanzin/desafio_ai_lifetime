@@ -1,7 +1,7 @@
 """
-Análise de Sentimento e Insights.
+Schemas da Feature Analyzer - Análise de Sentimento e Insights.
 
-Este módulo contém os schemas Pydantic específicos para o serviço
+Este módulo contém os schemas Pydantic específicos para a feature
 de análise de sentimento e geração de insights de reuniões.
 """
 

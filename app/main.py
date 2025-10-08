@@ -262,8 +262,8 @@ async def validation_exception_handler(
         })
     
     logger.warning(
-        f"[{request_id}] Validation error | "
-        f"errors={errors}"
+        f"⚠️ [{request_id}] Validation error | "
+        f"🔍 errors={errors}"
     )
     
     return JSONResponse(
@@ -306,9 +306,9 @@ async def rate_limit_exception_handler(
     record_rate_limit_exceeded(endpoint)
     
     logger.warning(
-        f"[{request_id}] Rate limit exceeded | "
-        f"ip={client_ip} | "
-        f"limit={rate_limit}/minute"
+        f"🚦 [{request_id}] Rate limit exceeded | "
+        f"🌐 ip={client_ip} | "
+        f"⏱️ limit={rate_limit}/minute"
     )
     
     return JSONResponse(
@@ -349,9 +349,9 @@ async def generic_exception_handler(
     request_id = getattr(request.state, "request_id", "-")
     
     logger.error(
-        f"[{request_id}] Unhandled exception | "
-        f"type={type(exc).__name__} | "
-        f"error={str(exc)[:200]}"
+        f"💥 [{request_id}] Unhandled exception | "
+        f"🚨 type={type(exc).__name__} | "
+        f"💬 error={str(exc)[:200]}"
     )
     
     return JSONResponse(
@@ -388,6 +388,7 @@ async def health_check() -> Dict[str, str]:
         # {"status": "healthy", "service": "meeting-extractor"}
         ```
     """
+    logger.debug("💚 Health check called")
     return {
         "status": "healthy",
         "service": "meeting-extractor",
@@ -508,14 +509,14 @@ async def extract_meeting(
         has_metadata = False
     
     logger.info(
-        f"[INCOMING] [{request_id}] POST /extract received | "
+        f"📥 [INCOMING] [{request_id}] POST /extract received | "
         f"format={input_format} | "
         f"has_metadata={has_metadata}"
     )
     
     try:
         # 1. Normalizar input (converte ambos os formatos para NormalizedInput)
-        logger.info(f"[{request_id}] Iniciando normalização...")
+        logger.info(f"🔄 [{request_id}] Iniciando normalização...")
         normalized = body.to_normalized()
         
         # Registra métrica do tamanho da transcrição
@@ -534,7 +535,7 @@ async def extract_meeting(
         ])
         
         logger.info(
-            f"[{request_id}] Normalização concluída | "
+            f"✅ [{request_id}] Normalização concluída | "
             f"transcript_len={len(normalized.transcript)} chars | "
             f"transcript_words={len(normalized.transcript.split())} words | "
             f"metadata_fields={metadata_fields}/7 | "
@@ -558,14 +559,14 @@ async def extract_meeting(
         # 3. Log sucesso com duração
         duration = time.time() - start_time
         logger.info(
-            f"[{request_id}] Extração concluída com sucesso | "
-            f"duration={duration:.2f}s | "
-            f"meeting_id={extracted.meeting_id} | "
-            f"summary_words={len(extracted.summary.split())} | "
-            f"key_points={len(extracted.key_points)} | "
-            f"action_items={len(extracted.action_items)} | "
-            f"topics={len(extracted.topics)} | "
-            f"idempotency_key={extracted.idempotency_key[:16]}..."
+            f"🎉 [{request_id}] Extração concluída com sucesso | "
+            f"⏱️ duration={duration:.2f}s | "
+            f"📋 meeting_id={extracted.meeting_id} | "
+            f"📝 summary_words={len(extracted.summary.split())} | "
+            f"🔑 key_points={len(extracted.key_points)} | "
+            f"✅ action_items={len(extracted.action_items)} | "
+            f"🏷️ topics={len(extracted.topics)} | "
+            f"🔐 idempotency_key={extracted.idempotency_key[:16]}..."
         )
         
         # Registra métrica de reunião extraída com sucesso
@@ -582,9 +583,9 @@ async def extract_meeting(
     except (RateLimitError, APITimeoutError, APIError) as e:
         # Erros de comunicação com OpenAI API → 502 Bad Gateway
         logger.error(
-            f"[{request_id}] Erro de comunicação com OpenAI API | "
-            f"type={type(e).__name__} | "
-            f"error={str(e)[:200]}"
+            f"❌ [{request_id}] Erro de comunicação com OpenAI API | "
+            f"🚨 type={type(e).__name__} | "
+            f"💬 error={str(e)[:200]}"
         )
         
         # Registra métrica de erro 502
@@ -608,8 +609,8 @@ async def extract_meeting(
         # Erro de validação: OpenAI retornou dados inválidos → 502 Bad Gateway
         # Este é um problema do serviço externo (OpenAI), não interno
         logger.error(
-            f"[{request_id}] OpenAI retornou dados inválidos após repair | "
-            f"errors={e.errors()}"
+            f"⚠️ [{request_id}] OpenAI retornou dados inválidos após repair | "
+            f"🔴 errors={e.errors()}"
         )
         
         # Registra métrica de erro 502
@@ -630,9 +631,9 @@ async def extract_meeting(
     except Exception as e:
         # Qualquer outro erro não previsto
         logger.error(
-            f"[{request_id}] Erro inesperado | "
-            f"type={type(e).__name__} | "
-            f"error={str(e)[:200]}"
+            f"💥 [{request_id}] Erro inesperado | "
+            f"🚨 type={type(e).__name__} | "
+            f"💬 error={str(e)[:200]}"
         )
         
         # Registra métrica de erro 500
@@ -649,7 +650,7 @@ async def extract_meeting(
 
 
 
-# ENDPOINT PARA DEBUG
+# ENDPOINT PARA DEBUG DAS MÉTRICAS
 @app.get("/metrics", tags=["Debug"])
 async def debug_metrics():
     """Endpoint para testar métricas"""

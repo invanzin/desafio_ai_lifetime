@@ -1,7 +1,7 @@
 """
-Schemas do Desafio 1 - Extração de Informações.
+Schemas da Feature Extractor - Extração de Informações.
 
-Este módulo contém os schemas Pydantic específicos para o serviço
+Este módulo contém os schemas Pydantic específicos para a feature
 de extração de informações estruturadas de reuniões.
 """
 

@@ -1,8 +1,8 @@
 """
-Schemas comuns compartilhados entre Extract e Analyze (Desafios 1 e 2).
+Schemas comuns compartilhados entre Extractor e Analyzer.
 
-Este módulo contém as classes Pydantic que são reutilizadas por ambos
-os serviços de extração e análise de reuniões.
+Este módulo contém as classes Pydantic que são reutilizadas por ambas
+as features de extração e análise de reuniões.
 """
 
 from typing import Optional
@@ -274,8 +274,8 @@ class NormalizedInput(BaseModel):
     processamento downstream pelos extractors e analyzers.
     
     É o formato intermediário usado internamente por:
-    - extract_meeting_chain() no extractor.py (Desafio 1)
-    - analyze_sentiment_chain() no analyzer.py (Desafio 2)
+    - extract_meeting_chain() no extractor.py (Feature Extractor)
+    - analyze_sentiment_chain() no analyzer.py (Feature Analyzer)
     
     Attributes:
         transcript (str): Texto completo da transcrição da reunião. Campo obrigatório.
