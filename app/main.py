@@ -674,4 +674,3 @@ if __name__ == "__main__":
         reload=True,  # Hot reload em desenvolvimento
         log_level="info",
     )
-

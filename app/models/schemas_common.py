@@ -261,7 +261,7 @@ class MeetingRequest(BaseModel):
 
 
 # ============================================================================
-# NORMALIZED INPUT (interno, após normalização)
+# NORMALIZED INPUT (interno, após verificação)
 # ============================================================================
 
 

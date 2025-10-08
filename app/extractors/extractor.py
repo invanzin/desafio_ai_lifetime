@@ -117,13 +117,18 @@ except Exception as e:
     logger.error(f"❌ Falha ao carregar o prompt '{prompt_hub_name}' do Hub: {e}")
     raise
 
-# Chain SEM parser (para capturar metadados)
+# ============================================================================
+# CHAIN
+# ============================================================================
+
+# Chain SEM parser (para capturar metadados) - Parser é feito após a captura dos metadados (tokens)
 chain_raw = prompt | llm
 
 # Chain completa: prompt → LLM → parser JSON  
 #chain = prompt | llm | parser
 
 
+# ============================================================================
 # FUNÇÕES AUXILIARES
 # ============================================================================
 
@@ -424,4 +429,116 @@ async def extract_meeting_chain(
 
         # 🔥 PRIMEIRA CHAMADA: Chain RAW para capturar metadados
         raw_response = await chain_raw.ainvoke(
-            { noe(ime
+            {
+                "transcript": normalized.transcript,
+                "metadata_json": metadata_json
+            },
+            config=trace_config # configuração para o LangSmith
+        )
+        
+        # 🔥 EXTRAI TOKENS DA RESPOSTA RAW (Prometheus)
+        model = get_model_from_env()    
+        record_openai_request(model, "success")
+        
+        # Extrai e registra tokens (Prometheus)
+        _extract_and_record_token_usage(raw_response, model, request_id)
+        
+        # Parse manual do conteúdo JSON
+        raw_output = parser.parse(raw_response.content)
+        
+        llm_duration = time.time() - llm_start
+        logger.info(
+            f"[RESPONSE] [{request_id}] ✅ OpenAI API respondeu com sucesso | "
+            f"duration={llm_duration:.2f}s | "
+            f"output_type={'dict' if isinstance(raw_output, dict) else type(raw_output).__name__} | "
+            f"output_keys={list(raw_output.keys()) if isinstance(raw_output, dict) else 'N/A'}"
+        )
+        
+    except (RateLimitError, APITimeoutError, APIError) as e:
+        llm_duration = time.time() - llm_start
+        logger.error(
+            f"[ERROR] [{request_id}] ❌ FALHA após {MAX_RETRY_ATTEMPTS} tentativas de chamada à OpenAI | "
+            f"total_duration={llm_duration:.2f}s | "
+            f"error_type={type(e).__name__} | "
+            f"error_msg={str(e)[:200]}"
+        )
+        
+        # Registra métricas de erro da OpenAI
+        model = get_model_from_env()
+        record_openai_request(model, "error")
+        record_openai_error(type(e).__name__)
+        
+        raise
+    
+    # Tenta validar com Pydantic
+    try:
+        extracted = ExtractedMeeting.model_validate(raw_output)
+        logger.debug(f"[SUCCESS] [{request_id}] ✅ Validação Pydantic OK na primeira tentativa")
+        
+        # Log sucesso final imediatamente após validação bem-sucedida
+        logger.info(
+            f"[SUCCESS] [{request_id}] 🎉 Extração concluída com sucesso | "
+            f"meeting_id={extracted.meeting_id} | "
+            f"summary_words={len(extracted.summary.split())} | "
+            f"key_points={len(extracted.key_points)} | "
+            f"action_items={len(extracted.action_items)}"
+        )
+        
+    except Exception as validation_error:
+        # Validação falhou → tenta reparar UMA vez
+        logger.warning(
+            f"[{request_id}] ⚠️ Validação Pydantic falhou | "
+            f"erro={type(validation_error).__name__}: {str(validation_error)[:200]}"
+        )
+        
+        try:
+            
+            repaired_output = await _repair_json(
+                malformed_output=raw_output,
+                validation_error=str(validation_error),
+                normalized=normalized,
+                request_id=request_id
+            )
+            
+            # Tenta validar novamente
+            extracted = ExtractedMeeting.model_validate(repaired_output)
+            logger.info(f"[SUCCESS] [{request_id}] ✅ Validação OK após reparo")
+            
+            # Log sucesso final imediatamente após validação bem-sucedida
+            logger.info(
+                f"[SUCCESS] [{request_id}] 🎉 Extração concluída com sucesso | "
+                f"meeting_id={extracted.meeting_id} | "
+                f"summary_words={len(extracted.summary.split())} | "
+                f"key_points={len(extracted.key_points)} | "
+                f"action_items={len(extracted.action_items)}"
+            )
+            
+            # Registra métrica de reparo bem-sucedido
+            record_repair_attempt("success")
+            
+        except Exception as repair_error:
+            logger.error(
+                f"[{request_id}] ❌ Validação falhou mesmo após reparo | "
+                f"erro={type(repair_error).__name__}: {str(repair_error)[:200]}"
+            )
+            
+            # Registra métrica de reparo falhado
+            record_repair_attempt("failed")
+            
+            raise
+    
+    # Preenche a chave de idempotência se possível
+    idem_key = normalized.compute_idempotency_key()
+    if idem_key:
+        extracted.idempotency_key = idem_key
+        logger.debug(f"[{request_id}] 🔑 Idempotency key calculada: {idem_key[:16]}...")
+    else:
+        # Se não for possível calcular, usa placeholder
+        extracted.idempotency_key = IDEMPOTENCY_KEY_PLACEHOLDER
+        logger.warning(
+            f"[{request_id}] ⚠️ Não foi possível calcular idempotency_key "
+            f"(faltam meeting_id, meet_date ou customer_id)"
+        )
+    
+    return extracted
+

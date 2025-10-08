@@ -77,7 +77,7 @@ class ExtractedMeeting(BaseModel):
     banker_id: str
     banker_name: str
     meet_type: str
-    meet_date: datetime or str
+    meet_date: Union[datetime, str]
     
     # Campos obrigatórios - Dados extraídos por IA
     summary: str  # Validado para ter 100-200 palavras
@@ -119,15 +119,6 @@ class ExtractedMeeting(BaseModel):
         Raises:
             ValueError: Se o resumo tiver menos de 100 ou mais de 200 palavras.
                        A mensagem de erro inclui a contagem atual de palavras.
-        
-        Example:
-            >>> # Resumo muito curto - FALHA
-            >>> ExtractedMeeting(summary="Breve resumo", ...)
-            ValueError: summary deve ter 100-200 palavras, tem 2
-            
-            >>> # Resumo no tamanho correto - SUCESSO
-            >>> ExtractedMeeting(summary="Texto com 150 palavras...", ...)
-            # OK
         
         Note:
             A contagem considera palavras separadas por espaço em branco.
