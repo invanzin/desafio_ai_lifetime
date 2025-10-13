@@ -42,11 +42,13 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from openai import RateLimitError, APITimeoutError, APIError
 
 # Schemas de validação
-from app.models.schemas_common import NormalizedInput
-from app.models.schemas_extract import ExtractRequest, ExtractedMeeting
+from app.models.schemas_common import NormalizedInput, MeetingRequest
+from app.models.schemas_extract import ExtractedMeeting
+from app.models.schemas_analyze import AnalyzedMeeting
 
-# Extractor principal
+# Extractor e Analyzer principais
 from app.extractors.extractor import extract_meeting_chain
+from app.analyzers.analyzer import analyze_sentiment_chain
 
 # Configuração de logging centralizada
 from app.config.logging_config import setup_logging, get_logger
@@ -406,7 +408,7 @@ async def health_check() -> Dict[str, str]:
 @limiter.limit("10/minute")
 async def extract_meeting(
     request: Request,
-    body: ExtractRequest # faz a validação pelo Pydantic do body
+    body: MeetingRequest # faz a validação pelo Pydantic do body
     ) -> ExtractedMeeting:
     """
     Extrai informações estruturadas de uma transcrição de reunião.
@@ -649,6 +651,279 @@ async def extract_meeting(
         )
 
 
+
+# ============================================================================
+# ENDPOINT: /analyze
+# ============================================================================
+
+@app.post(
+    "/analyze",
+    response_model=AnalyzedMeeting,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis"],
+    summary="Analisa sentimento e gera insights de uma transcrição",
+    response_description="Análise de sentimento e insights gerados com sucesso"
+    )
+@limiter.limit("10/minute")
+async def analyze_meeting(
+    request: Request,
+    body: MeetingRequest # faz a validação pelo Pydantic do body
+    ) -> AnalyzedMeeting:
+    """
+    Analisa sentimento e gera insights de uma transcrição de reunião.
+    
+    Este endpoint recebe uma transcrição de reunião bancária (em um de dois formatos)
+    e retorna um JSON estruturado com análise de sentimento e insights estratégicos.
+    
+    **Formatos de entrada aceitos:**
+    
+    1. **Formato explícito** (transcript + metadata opcional):
+       ```json
+       {
+         "transcript": "Cliente: Estou muito satisfeito... Banker: Que bom...",
+         "metadata": {
+           "meeting_id": "MTG123",
+           "customer_id": "CUST456",
+           "customer_name": "ACME S.A.",
+           "banker_id": "BKR789",
+           "banker_name": "Pedro Falcão",
+           "meet_type": "Segunda Reunião",
+           "meet_date": "2025-09-10T14:30:00Z"
+         }
+       }
+       ```
+    
+    2. **Formato bruto** (raw_meeting, vindo de sistemas upstream):
+       ```json
+       {
+         "raw_meeting": {
+           "meet_id": "MTG123",
+           "customer_id": "CUST456",
+           "customer_name": "ACME S.A.",
+           "banker_id": "BKR789",
+           "banker_name": "Pedro Falcão",
+           "meet_date": "2025-09-10T14:30:00Z",
+           "meet_type": "Segunda Reunião",
+           "meet_transcription": "Cliente: Estou muito satisfeito..."
+         }
+       }
+       ```
+    
+    **Campos de análise retornados:**
+    
+    - `sentiment_label`: Classificação categórica ("positive", "neutral", "negative")
+    - `sentiment_score`: Score numérico (0.0 a 1.0)
+    - `summary`: Resumo executivo (100-200 palavras)
+    - `key_points`: Pontos-chave discutidos
+    - `action_items`: Ações/tarefas identificadas
+    - `risks`: Riscos ou preocupações levantados pelo cliente
+    
+    **Observações importantes:**
+    
+    - Metadados são **opcionais** no input, mas **obrigatórios** no output
+    - Se metadados não forem fornecidos, o LLM tentará extraí-los da transcrição
+    - Se metadados forem fornecidos, eles têm **prioridade absoluta** sobre a transcrição
+    - A chave de idempotência é calculada automaticamente (SHA-256) quando possível
+    
+    **Resiliência:**
+    
+    - Timeout: 30 segundos máximo por chamada à OpenAI
+    - Retries: até 3 tentativas com backoff exponencial (0.5s, 1s, 2s)
+    - Repair: 1 tentativa de reparo automático se validação Pydantic falhar
+    
+    **Segurança:**
+    
+    - Logs não contêm transcrições completas (apenas primeiros 300 chars)
+    - Request ID único para correlação de logs
+    - Sem exposição de detalhes internos em erros
+    
+    Args:
+        request: Objeto Request do FastAPI (injetado automaticamente)
+        body: Corpo da requisição validado pelo Pydantic
+    
+    Returns:
+        AnalyzedMeeting: JSON estruturado com análise de sentimento e insights
+    
+    Raises:
+        422: Erro de validação no input
+        502: Erro na chamada à OpenAI (timeout, rate limit, etc)
+        500: Erro interno não esperado
+    
+    Example:
+        ```bash
+        curl -X POST http://localhost:8000/analyze \\
+          -H "Content-Type: application/json" \\
+          -d '{
+            "transcript": "Cliente: Estou muito satisfeito com os resultados...",
+            "metadata": {
+              "meeting_id": "MTG001",
+              "customer_id": "CUST001"
+            }
+          }'
+        ```
+    """
+    import time
+    start_time = time.time()
+    http_start_time = time.time()  # Timer separado para métricas HTTP
+    request_id = request.state.request_id
+    
+    # Log início - Identifica formato de entrada
+    if body.raw_meeting:
+        input_format = "raw_meeting"
+        has_metadata = True
+    elif body.metadata:
+        input_format = "transcript+metadata"
+        has_metadata = True
+    else:
+        input_format = "transcript_only"
+        has_metadata = False
+    
+    logger.info(
+        f"[INCOMING] [{request_id}] POST /analyze received | "
+        f"format={input_format} | "
+        f"has_metadata={has_metadata}"
+    )
+    
+    try:
+        # 1. Normalizar input (converte ambos os formatos para NormalizedInput)
+        logger.info(f"[{request_id}] Iniciando normalização...")
+        normalized = body.to_normalized()
+        
+        # Registra métrica do tamanho da transcrição
+        transcript_size = len(normalized.transcript.encode('utf-8'))
+        record_transcript_size(transcript_size)
+        
+        # Log detalhes da normalização
+        metadata_fields = sum([
+            normalized.meeting_id is not None,
+            normalized.customer_id is not None,
+            normalized.customer_name is not None,
+            normalized.banker_id is not None,
+            normalized.banker_name is not None,
+            normalized.meet_type is not None,
+            normalized.meet_date is not None
+        ])
+        
+        logger.info(
+            f"[{request_id}] Normalização concluída | "
+            f"transcript_len={len(normalized.transcript)} chars | "
+            f"transcript_words={len(normalized.transcript.split())} words | "
+            f"metadata_fields={metadata_fields}/7 | "
+            f"meeting_id={normalized.meeting_id or 'will_extract'} | "
+            f"customer_id={normalized.customer_id or 'will_extract'}"
+        )
+        
+        # 2. Chamar o analyzer (LangChain + OpenAI)
+        # Timer para duração da análise
+        analysis_start = time.time()
+        
+        analyzed = await analyze_sentiment_chain(
+            normalized=normalized,
+            request_id=request_id
+        )
+        
+        # Registra métrica de duração da análise
+        analysis_duration = time.time() - analysis_start
+        extraction_duration_seconds.observe(analysis_duration)
+        
+        # 3. Log sucesso com duração
+        duration = time.time() - start_time
+        logger.info(
+            f"[{request_id}] Análise concluída com sucesso | "
+            f"duration={duration:.2f}s | "
+            f"meeting_id={analyzed.meeting_id} | "
+            f"sentiment={analyzed.sentiment_label} | "
+            f"score={analyzed.sentiment_score:.2f} | "
+            f"summary_words={len(analyzed.summary.split())} | "
+            f"key_points={len(analyzed.key_points)} | "
+            f"action_items={len(analyzed.action_items)} | "
+            f"risks={len(analyzed.risks)} | "
+            f"idempotency_key={analyzed.idempotency_key[:16]}..."
+        )
+        
+        # Registra métrica de reunião analisada com sucesso
+        source = "raw_meeting" if body.raw_meeting else "transcript"
+        meeting_type = analyzed.meet_type or "Unknown"
+        record_meeting_extracted(source, meeting_type)
+        
+        # Registra métrica de duração HTTP total
+        http_duration = time.time() - http_start_time
+        record_http_duration("POST", "/analyze", http_duration)
+        
+        return analyzed
+    
+    except (RateLimitError, APITimeoutError, APIError) as e:
+        # Erros de comunicação com OpenAI API → 502 Bad Gateway
+        logger.error(
+            f"[{request_id}] Erro de comunicação com OpenAI API | "
+            f"type={type(e).__name__} | "
+            f"error={str(e)[:200]}"
+        )
+        
+        # Registra métrica de erro 502
+        record_api_error("openai_communication_error", 502)
+        
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={
+                "error": "openai_communication_error",
+                "message": (
+                    "Erro ao comunicar com OpenAI API "
+                    "(timeout, rate limit ou indisponibilidade). "
+                    "Tente novamente em alguns instantes."
+                ),
+                "error_type": type(e).__name__,
+                "request_id": request_id,
+            }
+        )
+    
+    except ValidationError as e:
+        # Erro de validação: OpenAI retornou dados inválidos → 502 Bad Gateway
+        # Este é um problema do serviço externo (OpenAI), não interno
+        logger.error(
+            f"[{request_id}] OpenAI retornou dados inválidos após repair | "
+            f"errors={e.errors()}"
+        )
+        
+        # Registra métrica de erro 502
+        record_api_error("openai_invalid_response", 502)
+        
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={
+                "error": "openai_invalid_response",
+                "message": (
+                    "OpenAI retornou dados inválidos ou incompletos. "
+                    "Tente novamente ou verifique se a transcrição está legível."
+                ),
+                "request_id": request_id,
+            }
+        )
+    
+    except Exception as e:
+        # Qualquer outro erro não previsto
+        logger.error(
+            f"[{request_id}] Erro inesperado | "
+            f"type={type(e).__name__} | "
+            f"error={str(e)[:200]}"
+        )
+        
+        # Registra métrica de erro 500
+        record_api_error("internal_error", 500)
+        
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "internal_error",
+                "message": "Erro interno ao processar a requisição",
+                "request_id": request_id,
+            }
+        )
+
+
+# ============================================================================
+# DEBUG E MÉTRICAS
+# ============================================================================
 
 # ENDPOINT PARA DEBUG DAS MÉTRICAS
 @app.get("/metrics", tags=["Debug"])

@@ -135,11 +135,6 @@ chain_raw = prompt | llm
 # Chain completa: prompt → LLM → parser JSON  
 #chain = prompt | llm | parser
 
-
-# Funções auxiliares movidas para utils/ (mantendo o código DRY)
-# Importadas no início do arquivo via: from utils import ...
-
-
 # ============================================================================
 # FUNÇÃO PRINCIPAL DE EXTRAÇÃO
 # ============================================================================
