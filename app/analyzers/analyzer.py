@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 # INICIALIZAÇÃO DO LLM E PROMPT
 # ============================================================================
 
-llm = default_client.get_llm()
+llm = default_client.get_llm(temperature=0.2)
 parser = JsonOutputParser()
 
 # Carrega o prompt do Analyzer do LangChain Hub
