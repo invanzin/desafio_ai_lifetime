@@ -344,11 +344,11 @@ assert key1 == key2  # ✅ Verdadeiro!
 
 ---
 
-## 📤 Schema de Saída
+## 📤 Schemas de Saída
 
-### `ExtractedMeeting` (Resultado Final)
+### Feature 1: `ExtractedMeeting` (Resultado do Extractor)
 
-**Propósito:** Estrutura validada do resultado da extração, retornada ao cliente.
+**Propósito:** Estrutura validada do resultado da extração, retornada pelo endpoint `/extract`.
 
 ```python
 class ExtractedMeeting(BaseModel):
@@ -365,7 +365,7 @@ class ExtractedMeeting(BaseModel):
     summary: str  # Validado: 100-200 palavras
     key_points: List[str]
     action_items: List[str]
-    topics: List[str]
+    topics: List[str]  # ← Campo específico do Extractor
     
     # Metadados de controle (obrigatórios)
     source: Literal["lftm-challenge"] = "lftm-challenge"
@@ -376,7 +376,45 @@ class ExtractedMeeting(BaseModel):
     duration_sec: Optional[int] = None
 ```
 
-#### Validação Customizada: Summary Length
+---
+
+### Feature 2: `AnalyzedMeeting` (Resultado do Analyzer)
+
+**Propósito:** Estrutura validada do resultado da análise de sentimento, retornada pelo endpoint `/analyze`.
+
+```python
+class AnalyzedMeeting(BaseModel):
+    # Metadados da reunião (obrigatórios)
+    meeting_id: str
+    customer_id: str
+    customer_name: str
+    banker_id: str
+    banker_name: str
+    meet_type: str
+    meet_date: datetime
+    
+    # Análise de sentimento (obrigatórios)
+    sentiment_label: Literal["positive", "neutral", "negative"]
+    sentiment_score: float  # Range: 0.0-1.0
+    
+    # Dados extraídos por IA (obrigatórios)
+    summary: str  # Validado: 100-200 palavras
+    key_points: List[str]
+    action_items: List[str]
+    
+    # Insights adicionais (obrigatórios)
+    risks: List[str]  # ← Campo específico do Analyzer (pode ser vazio [])
+    
+    # Metadados de controle (obrigatórios)
+    source: Literal["lftm-challenge"] = "lftm-challenge"
+    idempotency_key: Optional[str] = None
+```
+
+---
+
+#### Validações Customizadas do Extractor
+
+##### 1. Summary Length (ExtractedMeeting)
 
 O campo `summary` possui um validador que garante 100-200 palavras:
 
@@ -393,7 +431,81 @@ def validate_summary_length(cls, summary: str) -> str:
     return summary
 ```
 
-**Exemplos:**
+---
+
+#### Validações Customizadas do Analyzer
+
+##### 1. Summary Length (AnalyzedMeeting)
+
+Idêntico ao Extractor - garante 100-200 palavras.
+
+##### 2. Sentiment Score Range (AnalyzedMeeting)
+
+```python
+@field_validator("sentiment_score")
+def validate_sentiment_score_range(cls, score: float) -> float:
+    """
+    Valida que o score de sentimento está entre 0.0 e 1.0.
+    """
+    if not (0.0 <= score <= 1.0):
+        raise ValueError(
+            f"sentiment_score deve estar entre 0.0 e 1.0, recebido: {score}"
+        )
+    return score
+```
+
+##### 3. **Consistência Label ↔ Score (AnalyzedMeeting)** ⚠️ VALIDAÇÃO CRÍTICA
+
+Esta é a validação **mais importante** do Analyzer. Garante que `sentiment_label` e `sentiment_score` sejam **consistentes**:
+
+```python
+@model_validator(mode='after')
+def validate_sentiment_consistency(self):
+    """
+    Valida consistência entre sentiment_label e sentiment_score.
+    
+    Regras:
+    - "positive": score >= 0.6
+    - "neutral": 0.4 <= score < 0.6
+    - "negative": score < 0.4
+    """
+    label = self.sentiment_label
+    score = self.sentiment_score
+    
+    if label == "positive" and score < 0.6:
+        raise ValueError(
+            f"sentiment_label 'positive' requer score >= 0.6, recebido: {score}"
+        )
+    elif label == "neutral" and not (0.4 <= score < 0.6):
+        raise ValueError(
+            f"sentiment_label 'neutral' requer 0.4 <= score < 0.6, recebido: {score}"
+        )
+    elif label == "negative" and score >= 0.4:
+        raise ValueError(
+            f"sentiment_label 'negative' requer score < 0.4, recebido: {score}"
+        )
+    
+    return self
+```
+
+**Tabela de Consistência:**
+
+| sentiment_label | sentiment_score | Válido? | Exemplo |
+|-----------------|-----------------|---------|---------|
+| **positive** | 0.85 | ✅ | Cliente muito satisfeito |
+| **positive** | 0.6 | ✅ | Cliente satisfeito |
+| **positive** | 0.55 | ❌ | Score muito baixo! |
+| **neutral** | 0.5 | ✅ | Cliente neutro |
+| **neutral** | 0.45 | ✅ | Cliente levemente positivo |
+| **neutral** | 0.7 | ❌ | Score muito alto! |
+| **negative** | 0.3 | ✅ | Cliente insatisfeito |
+| **negative** | 0.1 | ✅ | Cliente muito frustrado |
+| **negative** | 0.5 | ❌ | Score muito alto! |
+
+---
+
+#### Exemplos de Validação - Extractor
+
 ```python
 # ❌ Muito curto (10 palavras)
 ExtractedMeeting(
@@ -415,6 +527,57 @@ ExtractedMeeting(
     # ... outros campos
 )
 # ValidationError: summary deve ter 100-200 palavras, tem 250
+```
+
+---
+
+#### Exemplos de Validação - Analyzer
+
+```python
+# ✅ VÁLIDO - Positive com score alto
+AnalyzedMeeting(
+    sentiment_label="positive",
+    sentiment_score=0.85,
+    summary="Reunião extremamente positiva... (152 palavras)",
+    risks=[]
+)
+# OK!
+
+# ❌ INVÁLIDO - Positive com score baixo
+AnalyzedMeeting(
+    sentiment_label="positive",
+    sentiment_score=0.3,  # ❌ < 0.6
+    summary="...",
+    risks=[]
+)
+# ValidationError: sentiment_label 'positive' requer score >= 0.6, recebido: 0.3
+
+# ✅ VÁLIDO - Neutral com score médio
+AnalyzedMeeting(
+    sentiment_label="neutral",
+    sentiment_score=0.5,
+    summary="Reunião neutra... (145 palavras)",
+    risks=[]
+)
+# OK!
+
+# ✅ VÁLIDO - Negative com riscos
+AnalyzedMeeting(
+    sentiment_label="negative",
+    sentiment_score=0.25,
+    summary="Reunião com objeções... (138 palavras)",
+    risks=["Cliente preocupado com taxas", "Mencionou possível cancelamento"]
+)
+# OK!
+
+# ❌ INVÁLIDO - Neutral com score muito alto
+AnalyzedMeeting(
+    sentiment_label="neutral",
+    sentiment_score=0.75,  # ❌ >= 0.6 (deveria ser "positive")
+    summary="...",
+    risks=[]
+)
+# ValidationError: sentiment_label 'neutral' requer 0.4 <= score < 0.6, recebido: 0.75
 ```
 
 #### Campo `source`
@@ -631,13 +794,23 @@ key = normalized.compute_idempotency_key()
 
 ## 📊 Resumo dos Schemas
 
-| Schema | Tipo | Propósito | Campos Obrigatórios |
-|--------|------|-----------|---------------------|
-| `Metadata` | Entrada | Metadados opcionais | Nenhum (todos opcionais) |
-| `RawMeeting` | Entrada | Formato upstream completo | 8 campos |
-| `ExtractRequest` | Entrada | Schema principal da API | 1 de 2 formatos |
-| `NormalizedInput` | Interno | Formato unificado | Apenas `transcript` |
-| `ExtractedMeeting` | Saída | Resultado validado | 14 campos |
+| Schema | Tipo | Propósito | Campos Obrigatórios | Feature |
+|--------|------|-----------|---------------------|---------|
+| `Metadata` | Entrada | Metadados opcionais | Nenhum (todos opcionais) | Compartilhado |
+| `RawMeeting` | Entrada | Formato upstream completo | 8 campos | Compartilhado |
+| `MeetingRequest` | Entrada | Schema principal da API | 1 de 2 formatos | Compartilhado |
+| `NormalizedInput` | Interno | Formato unificado | Apenas `transcript` | Compartilhado |
+| `ExtractedMeeting` | Saída | Resultado do Extractor | 14 campos | Extractor |
+| `AnalyzedMeeting` | Saída | Resultado do Analyzer | 15 campos | Analyzer |
+
+### Diferenças Entre Extractor e Analyzer
+
+| Aspecto | ExtractedMeeting | AnalyzedMeeting |
+|---------|------------------|-----------------|
+| **Campo Específico** | `topics: List[str]` | `sentiment_label`, `sentiment_score`, `risks` |
+| **Validações** | Summary 100-200 palavras | + Consistência label ↔ score |
+| **Uso** | Extração de dados estruturados | Análise de sentimento |
+| **Temperature LLM** | 0.0 (determinístico) | 0.2 (levemente criativo) |
 
 ---
 
@@ -725,5 +898,7 @@ meeting_dict = meeting.__dict__
 
 ---
 
-**Próximo:** [03-EXTRACTOR.md](03-EXTRACTOR.md) - Como funciona a extração com IA
+**Próximos:**
+- **[03-EXTRACTOR.md](03-EXTRACTOR.md)** - Como funciona a extração com IA (Feature Extractor)
+- **[04-ANALYZER.md](04-ANALYZER.md)** - Como funciona a análise de sentimento (Feature Analyzer)
 

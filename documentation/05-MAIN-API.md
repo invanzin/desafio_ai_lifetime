@@ -22,7 +22,8 @@ O arquivo `main.py` é a **porta de entrada** do microserviço. Ele:
 ✅ Adiciona Request-ID para rastreamento  
 ✅ Trata erros de forma robusta  
 ✅ Gera documentação automática (Swagger/ReDoc)  
-✅ Integra schemas.py + extractor.py
+✅ Integra schemas.py + extractor.py + analyzer.py  
+✅ **2 features principais:** `/extract` (extração) e `/analyze` (sentimento)
 
 ### Por que FastAPI?
 
@@ -80,9 +81,9 @@ async def extract(body: ExtractRequest):
                      ↓
 ┌─────────────────────────────────────────────────────┐
 │              3. ENDPOINT HANDLER                     │
-│              (extract_meeting)                       │
+│       (extract_meeting OU analyze_meeting)           │
 │  - Normaliza dados                                   │
-│  - Chama extractor                                   │
+│  - Chama extractor OU analyzer                       │
 │  - Retorna resultado                                 │
 └────────────────────┬────────────────────────────────┘
                      │
@@ -330,6 +331,16 @@ async def generic_exception_handler(
 
 ## 📡 Endpoints
 
+O microserviço expõe **3 endpoints principais**:
+
+| Endpoint | Método | Feature | Propósito |
+|----------|--------|---------|-----------|
+| `/health` | GET | - | Health check |
+| **`/extract`** | POST | **Extractor** | Extração de dados estruturados |
+| **`/analyze`** | POST | **Analyzer** | Análise de sentimento e insights |
+
+---
+
 ### 1. `GET /health` - Health Check
 
 **Propósito:** Verificar se o serviço está funcionando.
@@ -365,7 +376,7 @@ curl http://localhost:8000/health
 
 ---
 
-### 2. `POST /extract` - Extração de Informações
+### 2. `POST /extract` - Feature Extractor (Extração de Dados Estruturados)
 
 **Propósito:** Extrair informações estruturadas de uma transcrição.
 
@@ -491,9 +502,141 @@ except Exception as e:
 
 ---
 
-### 🚨 Tratamento de Erros Específicos do `/extract`
+### 3. `POST /analyze` - Feature Analyzer (Análise de Sentimento e Insights)
 
-O endpoint `/extract` possui **3 tipos de erro específicos** além dos handlers globais:
+**Propósito:** Analisar sentimento e gerar insights de uma transcrição.
+
+```python
+@app.post(
+    "/analyze",
+    response_model=AnalyzedMeeting,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis"],
+    summary="Analisa sentimento e gera insights de uma transcrição",
+    response_description="Análise de sentimento e insights gerados com sucesso"
+)
+@limiter.limit("10/minute")
+async def analyze_meeting(
+    request: Request,
+    body: MeetingRequest  # mesmo schema do /extract
+) -> AnalyzedMeeting:
+    """Analisa sentimento e gera insights de uma transcrição de reunião."""
+```
+
+#### Parâmetros do Decorator
+
+| Parâmetro | Valor | Propósito |
+|-----------|-------|-----------|
+| `response_model` | `AnalyzedMeeting` | Define schema de resposta (validação + docs) |
+| `status_code` | `200` | Código HTTP padrão de sucesso |
+| `tags` | `["Analysis"]` | Agrupa endpoints na documentação |
+| `summary` | "Analisa..." | Título curto no Swagger |
+| `response_description` | "Análise..." | Descrição da resposta no Swagger |
+| `@limiter.limit` | "10/minute" | Rate limiting por IP |
+
+#### Diferenças em relação ao `/extract`
+
+| Aspecto | `/extract` | `/analyze` |
+|---------|------------|------------|
+| **Response Model** | `ExtractedMeeting` | `AnalyzedMeeting` |
+| **Função chamada** | `extract_meeting_chain()` | `analyze_sentiment_chain()` |
+| **Temperature LLM** | 0.0 (determinístico) | 0.2 (levemente criativo) |
+| **Campo específico** | `topics` | `sentiment_label`, `sentiment_score`, `risks` |
+| **Validação extra** | - | Consistência label ↔ score |
+| **Tag Swagger** | "Extraction" | "Analysis" |
+
+#### Fluxo Interno do Endpoint
+
+O fluxo é **idêntico ao `/extract`**, com pequenas diferenças:
+
+```python
+request_id = request.state.request_id
+
+# Log início
+logger.info(
+    f"[{request_id}] POST /analyze | "
+    f"format={'raw_meeting' if body.raw_meeting else 'transcript+metadata'}"
+)
+
+try:
+    # 1️⃣ Normalizar input (mesmo processo)
+    normalized = body.to_normalized()
+    
+    logger.info(
+        f"[{request_id}] Input normalizado | "
+        f"transcript_len={len(normalized.transcript)} | "
+        f"has_metadata={normalized.meeting_id is not None}"
+    )
+    
+    # 2️⃣ Chamar o analyzer (LangChain + OpenAI com temperature=0.2)
+    analyzed = await analyze_sentiment_chain(
+        normalized=normalized,
+        request_id=request_id
+    )
+    
+    # 3️⃣ Log sucesso
+    logger.info(
+        f"[{request_id}] Análise concluída com sucesso | "
+        f"meeting_id={analyzed.meeting_id} | "
+        f"sentiment={analyzed.sentiment_label} | "
+        f"score={analyzed.sentiment_score:.2f}"
+    )
+    
+    return analyzed
+    
+except (RateLimitError, APITimeoutError, APIError) as e:
+    # Tratamento idêntico ao /extract
+    # → Retorna 502 Bad Gateway
+    ...
+    
+except ValidationError as e:
+    # Tratamento idêntico ao /extract
+    # → Retorna 502 Bad Gateway
+    # Nota: Pode falhar por inconsistência label ↔ score
+    ...
+    
+except Exception as e:
+    # Tratamento idêntico ao /extract
+    # → Retorna 500 Internal Server Error
+    ...
+```
+
+#### Validações Específicas do Analyzer
+
+Além das validações comuns, o `/analyze` possui uma **validação crítica adicional**:
+
+**Consistência sentiment_label ↔ sentiment_score:**
+
+```python
+# Regras de consistência (validadas pelo Pydantic)
+if sentiment_label == "positive" and sentiment_score < 0.6:
+    raise ValidationError("Inconsistente!")
+
+if sentiment_label == "neutral" and not (0.4 <= sentiment_score < 0.6):
+    raise ValidationError("Inconsistente!")
+
+if sentiment_label == "negative" and sentiment_score >= 0.4:
+    raise ValidationError("Inconsistente!")
+```
+
+**Tabela de Consistência:**
+
+| sentiment_label | sentiment_score | Válido? |
+|-----------------|-----------------|---------|
+| positive | 0.85 | ✅ |
+| positive | 0.55 | ❌ (< 0.6) |
+| neutral | 0.5 | ✅ |
+| neutral | 0.7 | ❌ (>= 0.6) |
+| negative | 0.3 | ✅ |
+| negative | 0.5 | ❌ (>= 0.4) |
+
+Se o LLM retornar dados inconsistentes e o reparo falhar, retorna **502 Bad Gateway**.
+
+---
+
+### 🚨 Tratamento de Erros - `/extract` e `/analyze`
+
+**Ambos endpoints** compartilham o **mesmo tratamento de erros**:
 
 #### **1. OpenAI Communication Error → 502 Bad Gateway**
 
@@ -634,13 +777,15 @@ except Exception as e:
 
 ---
 
-### 📊 Tabela Resumo: Erros do `/extract`
+### 📊 Tabela Resumo: Erros (ambos endpoints)
 
 | Erro | Status | Causa | Ação do Cliente | Retry? |
 |------|--------|-------|-----------------|--------|
 | `openai_communication_error` | **502** | Timeout/rate limit/indisponibilidade | ⏰ Tentar novamente em alguns segundos | ✅ Sim |
 | `openai_invalid_response` | **502** | OpenAI retornou dados inválidos | 🔄 Tentar novamente ou verificar transcrição | ✅ Sim |
 | `internal_error` | **500** | Bug ou problema de infraestrutura | 🔍 Reportar com Request-ID para debug | ❌ Não |
+
+**Nota:** No `/analyze`, erros de validação incluem inconsistência `sentiment_label` ↔ `sentiment_score`.
 
 ---
 
@@ -1165,6 +1310,137 @@ X-Request-ID: abc-456
 
 ---
 
+### Exemplo 5: Análise de Sentimento Positiva (`/analyze`)
+
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transcript": "Cliente: Estou muito satisfeito com a proposta! Vamos fechar hoje.",
+    "metadata": {
+      "meeting_id": "MTG002",
+      "customer_id": "CUST002",
+      "meet_date": "2025-09-11T10:00:00Z"
+    }
+  }'
+```
+
+**Resposta:**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-ID: abc-456
+
+{
+  "meeting_id": "MTG002",
+  "customer_id": "CUST002",
+  "customer_name": "Maria Santos",
+  "banker_name": "Carlos Mendes",
+  "meet_type": "Fechamento",
+  "meet_date": "2025-09-11T10:00:00Z",
+  "sentiment_label": "positive",
+  "sentiment_score": 0.92,
+  "summary": "Reunião extremamente positiva focando no fechamento... (152 palavras)",
+  "key_points": [
+    "Cliente demonstrou forte satisfação com a proposta",
+    "Decisão de fechamento tomada na reunião",
+    "Condições comerciais aceitas sem objeções"
+  ],
+  "action_items": [
+    "Enviar contrato para assinatura",
+    "Agendar reunião de formalização"
+  ],
+  "risks": [],
+  "source": "lftm-challenge",
+  "idempotency_key": "b9c3d4e5f6a7..."
+}
+```
+
+---
+
+### Exemplo 6: Análise de Sentimento Negativa com Riscos (`/analyze`)
+
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transcript": "Cliente: Estou preocupado com as taxas. Não sei se consigo pagar isso mensalmente..."
+  }'
+```
+
+**Resposta:**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-ID: xyz-999
+
+{
+  "meeting_id": "unknown",
+  "customer_id": "unknown",
+  "customer_name": "Cliente não identificado",
+  "banker_name": "Banker não identificado",
+  "meet_type": "Não especificado",
+  "meet_date": "2025-09-11T00:00:00Z",
+  "sentiment_label": "negative",
+  "sentiment_score": 0.25,
+  "summary": "Reunião com forte preocupação do cliente sobre viabilidade financeira... (145 palavras)",
+  "key_points": [
+    "Cliente expressou preocupação com capacidade de pagamento",
+    "Objeção forte sobre valor das taxas mensais",
+    "Dúvidas sobre sustentabilidade do compromisso"
+  ],
+  "action_items": [
+    "Revisar proposta com taxas reduzidas",
+    "Apresentar simulações alternativas de pagamento"
+  ],
+  "risks": [
+    "Cliente demonstrou forte preocupação com capacidade de pagamento",
+    "Possível desistência devido a condições financeiras"
+  ],
+  "source": "lftm-challenge",
+  "idempotency_key": "no-idempotency-key-available"
+}
+```
+
+---
+
+### Exemplo 7: Análise Neutral (`/analyze`)
+
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transcript": "Cliente: Entendi a proposta. Preciso avaliar com meu sócio antes de decidir."
+  }'
+```
+
+**Resposta:**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "sentiment_label": "neutral",
+  "sentiment_score": 0.5,
+  "summary": "Reunião neutra com cliente interessado mas sem decisão imediata... (138 palavras)",
+  "key_points": [
+    "Cliente recebeu proposta com interesse moderado",
+    "Necessidade de validação com sócio antes de decisão"
+  ],
+  "action_items": [
+    "Aguardar retorno do cliente após avaliação interna",
+    "Enviar resumo da proposta por email"
+  ],
+  "risks": [],
+  ...
+}
+```
+
+---
+
 ## 📖 Documentação Automática
 
 FastAPI gera documentação automática baseada nos schemas e docstrings:
@@ -1293,17 +1569,19 @@ if any_error:
 
 O `main.py` é responsável por:
 
-1. ✅ Expor endpoints HTTP (`/health`, `/extract`)
+1. ✅ Expor endpoints HTTP (`/health`, `/extract`, `/analyze`)
 2. ✅ Validar entrada automaticamente (Pydantic)
 3. ✅ Adicionar Request-ID para rastreamento (middleware)
 4. ✅ Tratar erros de forma robusta (3 tipos específicos + handlers globais)
 5. ✅ Gerar documentação automática (Swagger/ReDoc)
-6. ✅ Integrar todas as camadas (schemas + extractor)
+6. ✅ Integrar todas as camadas (schemas + extractor + analyzer)
+7. ✅ **2 features completas:** Extractor (extração) e Analyzer (sentimento)
 
 ### 🔗 Componentes Relacionados
 
-- **Schemas:** [02-SCHEMAS.md](02-SCHEMAS.md) - Validação de dados (ExtractRequest, ExtractedMeeting)
-- **Extractor:** [03-EXTRACTOR.md](03-EXTRACTOR.md) - Lógica de chamada à OpenAI
+- **Schemas:** [02-SCHEMAS.md](02-SCHEMAS.md) - Validação de dados (MeetingRequest, ExtractedMeeting, AnalyzedMeeting)
+- **Extractor:** [03-EXTRACTOR.md](03-EXTRACTOR.md) - Lógica de extração com OpenAI (temperature=0)
+- **Analyzer:** [04-ANALYZER.md](04-ANALYZER.md) - Lógica de análise de sentimento (temperature=0.2)
 - **Docker:** [DOCKER.md](DOCKER.md) - Como executar a aplicação
 
 ### 📊 Diagrama de Arquitetura Completa
@@ -1317,6 +1595,7 @@ O diagrama **"Arquitetura Completa: Visão End-to-End"** neste documento (seçã
 ---
 
 **Navegação:**
-- ⬅️ **Anterior:** [03-EXTRACTOR.md](03-EXTRACTOR.md) - Lógica de extração
+- ⬅️ **Anterior:** [04-ANALYZER.md](04-ANALYZER.md) - Lógica de análise de sentimento
 - ⬆️ **Índice:** [01-OVERVIEW.md](01-OVERVIEW.md) - Visão geral do sistema
+- ➡️ **Próximo:** [06-METRICS.md](06-METRICS.md) - Métricas e observabilidade
 
