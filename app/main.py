@@ -397,6 +397,10 @@ async def health_check() -> Dict[str, str]:
     }
 
 
+# ============================================================================
+# ENDPOINT: /extract
+# ============================================================================
+
 @app.post(
     "/extract",
     response_model=ExtractedMeeting,
