@@ -148,15 +148,15 @@ instrumentator = Instrumentator(
     inprogress_labels=True,
 )
 
-print("🔧 [DEBUG] Criando instrumentador Prometheus...")
+print("[DEBUG] Criando instrumentador Prometheus...")
 
 # Instrumenta a aplicação FastAPI
 instrumentator.instrument(app)
-print("✅ [DEBUG] Instrumentador aplicado à FastAPI!")
+print("[DEBUG] Instrumentador aplicado à FastAPI!")
 
 # Expõe o endpoint /metrics
 instrumentator.expose(app, endpoint="/metrics", tags=["Monitoring"])
-print("✅ [DEBUG] Endpoint /metrics exposto!")
+print("[DEBUG] Endpoint /metrics exposto!")
 
 # ============================================================================
 # CONFIGURAÇÃO DE RATE LIMITING
