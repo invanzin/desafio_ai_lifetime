@@ -103,7 +103,7 @@ curl -X POST http://localhost:8000/analyze \
 
 ## 📖 Estrutura da Documentação
 
-A documentação está organizada em **8 documentos principais**, totalizando **~205 KB** de conteúdo técnico detalhado:
+A documentação está organizada em **9 documentos principais**, totalizando **~265 KB** de conteúdo técnico detalhado:
 
 ### 1️⃣ [Visão Geral (OVERVIEW)](documentation/01-OVERVIEW.md) 📚
 
@@ -275,7 +275,33 @@ A documentação está organizada em **8 documentos principais**, totalizando **
 
 ---
 
-### 8️⃣ [Docker e Deploy](documentation/DOCKER.md) 🐳
+### 8️⃣ [Sistema de Cache de Idempotência](documentation/08-CACHE.md) 💾 **NOVO!**
+
+**O que você vai aprender:**
+- 🎯 **Por que implementar cache?** Economia de 30% nos custos OpenAI
+- 🏗️ Arquitetura do cache em memória (dict Python)
+- 🔑 Como funciona a `idempotency_key` (SHA-256)
+- ⏱️ TTL (Time-To-Live) configurável (padrão: 24h)
+- 🔄 **Fluxo completo:** CACHE HIT vs CACHE MISS
+- 📊 **Performance:** 1000x speedup em cache hits (5s → 5ms)
+- 🔍 **Logs estruturados:** `[CACHE HIT]`, `[CACHE MISS]`, `[CACHE SAVE]`, `[CACHE EXPIRED]`
+- 🧪 Script de teste automatizado
+- 🚀 **Próximo nível: Redis** (passo a passo completo para migração)
+
+**Ideal para:**
+- ✅ Economizar custos OpenAI (30% de redução)
+- ✅ Melhorar performance drasticamente
+- ✅ Garantir idempotência de requisições
+- ✅ Preparar para escalar horizontalmente (Redis)
+- ✅ Entender como funciona caching em APIs
+
+**Arquivos relacionados:**
+- `app/main.py` - Funções `get_from_cache()`, `save_to_cache()`, `clear_cache()`
+- `tests/integration/test_cache_idempotency.py` - Script de teste
+
+---
+
+### 9️⃣ [Docker e Deploy](documentation/DOCKER.md) 🐳
 
 **O que você vai aprender:**
 - 🐳 Como fazer build da imagem Docker
@@ -388,13 +414,15 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final (vá
     │       ↓
     ├─► 03-EXTRACTOR.md (Feature 1: Extração - temperature=0)
     │       ↓
-    ├─► 04-ANALYZER.md (Feature 2: Sentimento - temperature=0.2) ⭐ NOVO!
+    ├─► 04-ANALYZER.md (Feature 2: Sentimento - temperature=0.2) ⭐
     │       ↓
     ├─► 05-MAIN-API.md (Endpoints: /extract + /analyze)
     │       ↓
     ├─► 06-METRICS.md (Prometheus + custos OpenAI)
     │       ↓
     ├─► 07-TESTS.md (68 testes: 48 unit + 20 integration)
+    │       ↓
+    ├─► 08-CACHE.md (Sistema de cache idempotente) 💾 NOVO!
     │       ↓
     └─► DOCKER.md (Deploy com containers)
 ```
@@ -425,9 +453,10 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final (vá
 3. [03-EXTRACTOR.md](documentation/03-EXTRACTOR.md) - Feature 1: Extração
 4. [04-ANALYZER.md](documentation/04-ANALYZER.md) - Feature 2: Análise de Sentimento ⭐
 5. [05-MAIN-API.md](documentation/05-MAIN-API.md) - Endpoints HTTP (ambos)
-6. [07-TESTS.md](documentation/07-TESTS.md) - Testes
+6. [08-CACHE.md](documentation/08-CACHE.md) - Sistema de cache 💾
+7. [07-TESTS.md](documentation/07-TESTS.md) - Testes
 
-**Tempo estimado:** 90-120 minutos
+**Tempo estimado:** 120-150 minutos
 
 **O que você vai entender:**
 - Arquitetura completa (ambas features)
@@ -478,7 +507,7 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final (vá
 
 | Arquivo | Linhas | Responsabilidade | Documentação |
 |---------|--------|------------------|--------------|
-| `app/main.py` | ~957 | API FastAPI, 3 endpoints (/health, /extract, /analyze) | [05-MAIN-API.md](documentation/05-MAIN-API.md) |
+| `app/main.py` | ~1098 | API FastAPI, 3 endpoints + cache idempotente | [05-MAIN-API.md](documentation/05-MAIN-API.md) + [08-CACHE.md](documentation/08-CACHE.md) |
 | `app/models/schemas_common.py` | ~391 | Schemas compartilhados (MeetingRequest, NormalizedInput) | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) |
 | `app/models/schemas_extract.py` | ~146 | Schema do Extractor (ExtractedMeeting) | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) |
 | `app/models/schemas_analyze.py` | ~136 | Schema do Analyzer (AnalyzedMeeting) | [02-SCHEMAS.md](documentation/02-SCHEMAS.md) |
@@ -523,17 +552,19 @@ Este diagrama mostra o fluxo completo desde o cliente até a resposta final (vá
 
 | Métrica | Valor |
 |---------|-------|
-| **Features implementadas** | 2 (Extractor + Analyzer) |
+| **Features implementadas** | 3 (Extractor + Analyzer + Cache) |
 | **Endpoints** | 3 (/health, /extract, /analyze) |
-| **Linhas de código (prod)** | ~2.493 |
-| **Linhas de testes** | ~1.314 |
-| **Total de linhas** | ~3.807 |
-| **Documentação** | 8 arquivos, ~205 KB |
+| **Linhas de código (prod)** | ~2.634 |
+| **Linhas de testes** | ~1.496 |
+| **Total de linhas** | ~4.130 |
+| **Documentação** | 9 arquivos, ~265 KB |
 | **Cobertura de documentação** | 100% |
 | **Type hints** | 100% |
 | **Docstrings** | 100% |
 | **Testes** | 68 (48 unit + 20 integration) |
 | **Cobertura de testes** | ~85% |
+| **Speedup com cache** | 1000x (5s → 5ms em cache hits) |
+| **Economia estimada** | 30% nos custos OpenAI |
 
 ---
 

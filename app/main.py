@@ -21,7 +21,8 @@ import uuid
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
@@ -89,6 +90,78 @@ limiter = Limiter(
     default_limits=[],  # Sem limite global
     storage_uri="memory://",  # Storage em memória
 )
+
+
+# ============================================================================
+# CACHE EM MEMÓRIA PARA IDEMPOTÊNCIA
+# ============================================================================
+
+# Cache em memória: {idempotency_key: (result_dict, timestamp)}
+_cache: Dict[str, Tuple[dict, datetime]] = {}
+
+# TTL do cache em horas (24h = 1 dia)
+CACHE_TTL_HOURS = int(os.getenv("CACHE_TTL_HOURS", "24"))
+
+
+def get_from_cache(idempotency_key: str) -> Optional[dict]:
+    """
+    Busca um resultado no cache se ainda válido (dentro do TTL).
+    
+    Args:
+        idempotency_key: Chave de idempotência SHA-256
+        
+    Returns:
+        Dict com resultado se encontrado e válido, None caso contrário
+    """
+    if idempotency_key in _cache:
+        result, timestamp = _cache[idempotency_key]
+        
+        # Verifica se ainda está dentro do TTL
+        if datetime.now() - timestamp < timedelta(hours=CACHE_TTL_HOURS):
+            logger.info(
+                f"[CACHE HIT] idempotency_key={idempotency_key[:16]}... | "
+                f"age={(datetime.now() - timestamp).total_seconds():.1f}s | "
+                f"cache_size={len(_cache)}"
+            )
+            return result
+        else:
+            # Cache expirado, remove
+            del _cache[idempotency_key]
+            logger.info(
+                f"[CACHE EXPIRED] idempotency_key={idempotency_key[:16]}... | "
+                f"age={(datetime.now() - timestamp).total_seconds():.1f}s"
+            )
+    
+    logger.debug(f"[CACHE MISS] idempotency_key={idempotency_key[:16]}...")
+    return None
+
+
+def save_to_cache(idempotency_key: str, result: dict) -> None:
+    """
+    Salva um resultado no cache com timestamp atual.
+    
+    Args:
+        idempotency_key: Chave de idempotência SHA-256
+        result: Dicionário com o resultado a ser cacheado
+    """
+    _cache[idempotency_key] = (result, datetime.now())
+    logger.info(
+        f"[CACHE SAVE] idempotency_key={idempotency_key[:16]}... | "
+        f"cache_size={len(_cache)} | ttl={CACHE_TTL_HOURS}h"
+    )
+
+
+def clear_cache() -> int:
+    """
+    Limpa todo o cache e retorna quantos itens foram removidos.
+    
+    Returns:
+        Número de itens removidos do cache
+    """
+    count = len(_cache)
+    _cache.clear()
+    logger.info(f"[CACHE CLEARED] removed={count} items")
+    return count
 
 
 # ============================================================================
@@ -213,7 +286,7 @@ async def add_request_id_and_metrics(request: Request, call_next):
         )
         
         response.headers["X-Request-ID"] = request_id
-        return response
+    return response
         
     except Exception as e:
         # Registra métricas de erro
@@ -549,7 +622,37 @@ async def extract_meeting(
             f"customer_id={normalized.customer_id or 'will_extract'}"
         )
         
-        # 2. Chamar o extractor (LangChain + OpenAI)
+        # 2. Calcular idempotency_key e verificar cache
+        idempotency_key = normalized.compute_idempotency_key()
+        
+        # Se temos uma chave válida, verificar cache
+        if idempotency_key and idempotency_key != "no-idempotency-key-available":
+            cached_result = get_from_cache(idempotency_key)
+            
+            if cached_result:
+                # Cache HIT: retornar resultado cacheado sem processar
+                logger.info(
+                    f"🎯 [{request_id}] Retornando do cache (idempotente) | "
+                    f"idempotency_key={idempotency_key[:16]}... | "
+                    f"⏱️ duration={time.time() - start_time:.3f}s"
+                )
+                
+                # Registra métrica de duração HTTP total (cache hit é rápido!)
+                http_duration = time.time() - http_start_time
+                record_http_duration("POST", "/extract", http_duration)
+                
+                return ExtractedMeeting(**cached_result)
+            else:
+                logger.info(
+                    f"🔍 [{request_id}] Cache miss - processando normalmente | "
+                    f"idempotency_key={idempotency_key[:16]}..."
+                )
+        else:
+            logger.debug(
+                f"ℹ️ [{request_id}] Sem idempotency_key válido - cache não aplicado"
+            )
+        
+        # 3. Chamar o extractor (LangChain + OpenAI)
         # Timer para duração da extração
         extraction_start = time.time()
         
@@ -562,7 +665,11 @@ async def extract_meeting(
         extraction_duration = time.time() - extraction_start
         extraction_duration_seconds.observe(extraction_duration)
         
-        # 3. Log sucesso com duração
+        # 4. Salvar resultado no cache (se temos idempotency_key válido)
+        if idempotency_key and idempotency_key != "no-idempotency-key-available":
+            save_to_cache(idempotency_key, extracted.model_dump())
+        
+        # 5. Log sucesso com duração
         duration = time.time() - start_time
         logger.info(
             f"🎉 [{request_id}] Extração concluída com sucesso | "
@@ -817,7 +924,37 @@ async def analyze_meeting(
             f"customer_id={normalized.customer_id or 'will_extract'}"
         )
         
-        # 2. Chamar o analyzer (LangChain + OpenAI)
+        # 2. Calcular idempotency_key e verificar cache
+        idempotency_key = normalized.compute_idempotency_key()
+        
+        # Se temos uma chave válida, verificar cache
+        if idempotency_key and idempotency_key != "no-idempotency-key-available":
+            cached_result = get_from_cache(idempotency_key)
+            
+            if cached_result:
+                # Cache HIT: retornar resultado cacheado sem processar
+                logger.info(
+                    f"🎯 [{request_id}] Retornando do cache (idempotente) | "
+                    f"idempotency_key={idempotency_key[:16]}... | "
+                    f"⏱️ duration={time.time() - start_time:.3f}s"
+                )
+                
+                # Registra métrica de duração HTTP total (cache hit é rápido!)
+                http_duration = time.time() - http_start_time
+                record_http_duration("POST", "/analyze", http_duration)
+                
+                return AnalyzedMeeting(**cached_result)
+            else:
+                logger.info(
+                    f"🔍 [{request_id}] Cache miss - processando normalmente | "
+                    f"idempotency_key={idempotency_key[:16]}..."
+                )
+        else:
+            logger.debug(
+                f"ℹ️ [{request_id}] Sem idempotency_key válido - cache não aplicado"
+            )
+        
+        # 3. Chamar o analyzer (LangChain + OpenAI)
         # Timer para duração da análise
         analysis_start = time.time()
         
@@ -830,7 +967,11 @@ async def analyze_meeting(
         analysis_duration = time.time() - analysis_start
         extraction_duration_seconds.observe(analysis_duration)
         
-        # 3. Log sucesso com duração
+        # 4. Salvar resultado no cache (se temos idempotency_key válido)
+        if idempotency_key and idempotency_key != "no-idempotency-key-available":
+            save_to_cache(idempotency_key, analyzed.model_dump())
+        
+        # 5. Log sucesso com duração
         duration = time.time() - start_time
         logger.info(
             f"[{request_id}] Análise concluída com sucesso | "
