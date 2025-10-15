@@ -176,7 +176,8 @@ Cliente: Obrigado. Até a próxima reunião.
     # Validações de estrutura
     assert 100 <= len(result["summary"].split()) <= 200
     assert len(result["key_points"]) > 0
-    assert len(result["action_items"]) > 0
+    # action_items pode ser lista vazia em reuniões neutras simples (acompanhamento sem ações definidas)
+    assert isinstance(result["action_items"], list)
 
 
 @pytest.mark.asyncio

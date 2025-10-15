@@ -170,9 +170,7 @@ class OpenAIClient:
             "timeout": final_timeout,
             "api_key": self.api_key,
             # 🔥 HABILITANDO COLETA DE TOKENS:
-            "model_kwargs": {
-                "stream_usage": True,  # Para capturar usage em streaming
-            },
+            "stream_usage": True,  # Para capturar usage em streaming (parâmetro explícito)
             **kwargs
         }
         
