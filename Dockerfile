@@ -55,7 +55,8 @@ COPY --from=builder /app/venv /app/venv
 
 # Copia código da aplicação
 COPY app/ ./app/
-COPY test_api.py ./
+COPY llm/ ./llm/
+COPY utils/ ./utils/
 
 # Cria usuário não-root para segurança
 # Por que? Root em container é má prática de segurança

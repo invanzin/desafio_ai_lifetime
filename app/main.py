@@ -286,7 +286,7 @@ async def add_request_id_and_metrics(request: Request, call_next):
         )
         
         response.headers["X-Request-ID"] = request_id
-        return response
+    return response
         
     except Exception as e:
         # Registra métricas de erro

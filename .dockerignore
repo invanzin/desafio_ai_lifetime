@@ -64,4 +64,8 @@ tmp/
 temp/
 *.tmp
 
+# Logs (adicionar esta linha)
+logs/
+*.log
+
 

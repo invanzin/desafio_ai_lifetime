@@ -63,7 +63,7 @@ class MetricsDashboard:
         try:
             response = requests.get(self.metrics_url, timeout=5)
             response.raise_for_status()
-            return response.text
+    return response.text
         except requests.ConnectionError:
             print(f"[ERROR] API nao esta rodando em {self.base_url}")
             print(f"[TIP] Inicie a API com: uvicorn app.main:app --reload")
@@ -74,9 +74,9 @@ class MetricsDashboard:
     
     def parse_metric(self, metrics_text: str, metric_name: str) -> List[float]:
         """Extrai valores de uma métrica específica"""
-        pattern = f'{metric_name}{{[^}}]*}} ([0-9.]+)'
-        matches = re.findall(pattern, metrics_text)
-        return [float(m) for m in matches]
+    pattern = f'{metric_name}{{[^}}]*}} ([0-9.]+)'
+    matches = re.findall(pattern, metrics_text)
+    return [float(m) for m in matches]
 
     def parse_labeled_metric(self, metrics_text: str, metric_name: str) -> Dict[str, float]:
         """Extrai métricas com labels (ex: por tipo de reunião)"""

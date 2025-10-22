@@ -130,7 +130,7 @@ def test_required_fields_present():
         customer_name="Cliente Completo",
         banker_id="BNK-001",
         banker_name="Banker Completo",
-        meet_type="Primeira Reunião",
+            meet_type="Primeira Reunião",
         meet_date=datetime(2025, 10, 13, 14, 0, 0),
         summary=" ".join(["palavra"] * 150),
         key_points=["ponto 1", "ponto 2", "ponto 3"],
