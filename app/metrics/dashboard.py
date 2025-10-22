@@ -1,23 +1,69 @@
 import requests
 import re
 import json
-from datetime import datetime
-from typing import Dict, List, Tuple
+from datetime import datetime, timedelta
+from typing import Dict, List, Tuple, Optional
 import time
 import os
 import sys
+import math
+from dataclasses import dataclass
+from collections import defaultdict, deque
+import statistics
+
+@dataclass
+class MetricSnapshot:
+    """Snapshot de métricas em um momento específico"""
+    timestamp: datetime
+    openai_requests: int
+    openai_errors: int
+    total_cost: float
+    avg_duration: float
+    total_meetings: int
+    success_rate: float
+
+@dataclass
+class Alert:
+    """Estrutura para alertas do sistema"""
+    severity: str  # 'INFO', 'WARN', 'CRIT'
+    category: str  # 'PERFORMANCE', 'COST', 'ERROR', 'EFFICIENCY'
+    message: str
+    recommendation: str
+    value: float
+    threshold: float
+
+@dataclass
+class TrendData:
+    """Dados de tendência para análise temporal"""
+    metric_name: str
+    current_value: float
+    previous_value: float
+    change_percent: float
+    trend_direction: str  # 'UP', 'DOWN', 'STABLE'
 
 class MetricsDashboard:
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url
         self.metrics_url = f"{base_url}/metrics"
+        self.history: deque = deque(maxlen=100)  # Histórico de snapshots
+        self.alerts_history: List[Alert] = []
+        self.previous_metrics: Optional[Dict] = None
+        
+        # Configurações de alertas
+        self.alert_thresholds = {
+            'error_rate': 15.0,  # %
+            'avg_duration': 20.0,  # segundos
+            'cost_per_meeting': 0.10,  # USD
+            'success_rate': 85.0,  # %
+            'token_efficiency': 0.1,  # completion/prompt ratio
+        }
     
     def get_metrics(self) -> str:
         """Obtém métricas brutas do endpoint /metrics"""
         try:
             response = requests.get(self.metrics_url, timeout=5)
             response.raise_for_status()
-    return response.text
+            return response.text
         except requests.ConnectionError:
             print(f"[ERROR] API nao esta rodando em {self.base_url}")
             print(f"[TIP] Inicie a API com: uvicorn app.main:app --reload")
@@ -28,9 +74,9 @@ class MetricsDashboard:
     
     def parse_metric(self, metrics_text: str, metric_name: str) -> List[float]:
         """Extrai valores de uma métrica específica"""
-    pattern = f'{metric_name}{{[^}}]*}} ([0-9.]+)'
-    matches = re.findall(pattern, metrics_text)
-    return [float(m) for m in matches]
+        pattern = f'{metric_name}{{[^}}]*}} ([0-9.]+)'
+        matches = re.findall(pattern, metrics_text)
+        return [float(m) for m in matches]
 
     def parse_labeled_metric(self, metrics_text: str, metric_name: str) -> Dict[str, float]:
         """Extrai métricas com labels (ex: por tipo de reunião)"""
@@ -45,6 +91,160 @@ class MetricsDashboard:
                 result[key] = float(value)
         return result
     
+    def calculate_trends(self, current_metrics: Dict, previous_metrics: Dict) -> List[TrendData]:
+        """Calcula tendências comparando métricas atuais com anteriores"""
+        trends = []
+        
+        if not previous_metrics:
+            return trends
+        
+        # Métricas para análise de tendência
+        trend_metrics = [
+            ('total_requests', current_metrics.get('requests', {}).get('success', 0) + current_metrics.get('requests', {}).get('error', 0)),
+            ('total_cost', current_metrics.get('cost', 0)),
+            ('avg_duration', current_metrics.get('avg_duration', 0)),
+            ('success_rate', current_metrics.get('success_rate', 0)),
+        ]
+        
+        for metric_name, current_value in trend_metrics:
+            if metric_name == 'total_requests':
+                prev_value = previous_metrics.get('requests', {}).get('success', 0) + previous_metrics.get('requests', {}).get('error', 0)
+            elif metric_name == 'total_cost':
+                prev_value = previous_metrics.get('cost', 0)
+            elif metric_name == 'avg_duration':
+                prev_value = previous_metrics.get('avg_duration', 0)
+            elif metric_name == 'success_rate':
+                prev_value = previous_metrics.get('success_rate', 0)
+            else:
+                prev_value = 0
+            
+            if prev_value > 0:
+                change_percent = ((current_value - prev_value) / prev_value) * 100
+            else:
+                change_percent = 0 if current_value == 0 else 100
+            
+            if abs(change_percent) < 5:
+                trend_direction = 'STABLE'
+            elif change_percent > 0:
+                trend_direction = 'UP'
+            else:
+                trend_direction = 'DOWN'
+            
+            trends.append(TrendData(
+                metric_name=metric_name,
+                current_value=current_value,
+                previous_value=prev_value,
+                change_percent=change_percent,
+                trend_direction=trend_direction
+            ))
+        
+        return trends
+    
+    def generate_advanced_alerts(self, metrics: Dict) -> List[Alert]:
+        """Gera alertas avançados baseados em múltiplas métricas"""
+        alerts = []
+        
+        # Análise de taxa de erro
+        total_requests = metrics.get('requests', {}).get('success', 0) + metrics.get('requests', {}).get('error', 0)
+        if total_requests > 0:
+            error_rate = (metrics.get('requests', {}).get('error', 0) / total_requests) * 100
+            if error_rate > self.alert_thresholds['error_rate']:
+                severity = 'CRIT' if error_rate > 30 else 'WARN'
+                alerts.append(Alert(
+                    severity=severity,
+                    category='ERROR',
+                    message=f"Taxa de erro alta: {error_rate:.1f}%",
+                    recommendation="Verificar conectividade com OpenAI API e logs de erro",
+                    value=error_rate,
+                    threshold=self.alert_thresholds['error_rate']
+                ))
+        
+        # Análise de performance
+        avg_duration = metrics.get('avg_duration', 0)
+        if avg_duration > self.alert_thresholds['avg_duration']:
+            severity = 'CRIT' if avg_duration > 60 else 'WARN'
+            alerts.append(Alert(
+                severity=severity,
+                category='PERFORMANCE',
+                message=f"Tempo médio de processamento alto: {self.format_duration(avg_duration)}",
+                recommendation="Otimizar prompts ou considerar modelo mais rápido",
+                value=avg_duration,
+                threshold=self.alert_thresholds['avg_duration']
+            ))
+        
+        # Análise de custo
+        total_meetings = metrics.get('total_meetings', 0)
+        if total_meetings > 0:
+            cost_per_meeting = metrics.get('cost', 0) / total_meetings
+            if cost_per_meeting > self.alert_thresholds['cost_per_meeting']:
+                alerts.append(Alert(
+                    severity='WARN',
+                    category='COST',
+                    message=f"Custo por reunião alto: ${cost_per_meeting:.4f}",
+                    recommendation="Revisar tamanho das transcrições e otimizar prompts",
+                    value=cost_per_meeting,
+                    threshold=self.alert_thresholds['cost_per_meeting']
+                ))
+        
+        # Análise de eficiência de tokens
+        tokens = metrics.get('tokens', {})
+        if tokens.get('prompt', 0) > 0 and tokens.get('completion', 0) > 0:
+            efficiency = tokens.get('completion', 0) / tokens.get('prompt', 0)
+            if efficiency < self.alert_thresholds['token_efficiency']:
+                alerts.append(Alert(
+                    severity='INFO',
+                    category='EFFICIENCY',
+                    message=f"Baixa eficiência de tokens: {efficiency:.2f}",
+                    recommendation="Prompt muito longo ou resposta muito curta",
+                    value=efficiency,
+                    threshold=self.alert_thresholds['token_efficiency']
+                ))
+        
+        return alerts
+    
+    def create_ascii_chart(self, data: Dict[str, float], title: str, max_width: int = 50) -> str:
+        """Cria gráfico ASCII simples"""
+        if not data:
+            return f"{title}\n  Nenhum dado disponível"
+        
+        max_value = max(data.values()) if data.values() else 1
+        chart_lines = [f"{title}"]
+        chart_lines.append("-" * (max_width + 20))
+        
+        for key, value in sorted(data.items(), key=lambda x: x[1], reverse=True):
+            # Trunca chave se muito longa
+            display_key = key[:25] + "..." if len(key) > 25 else key
+            # Calcula largura da barra
+            bar_width = int((value / max_value) * max_width) if max_value > 0 else 0
+            bar = "█" * bar_width
+            chart_lines.append(f"  {display_key:<28} {value:6.0f} {bar}")
+        
+        return "\n".join(chart_lines)
+    
+    def create_performance_gauge(self, value: float, max_value: float, label: str) -> str:
+        """Cria medidor visual ASCII"""
+        if max_value == 0:
+            percentage = 0
+        else:
+            percentage = min(100, (value / max_value) * 100)
+        
+        # Cria barra de progresso
+        bar_length = 20
+        filled_length = int((percentage / 100) * bar_length)
+        bar = "█" * filled_length + "░" * (bar_length - filled_length)
+        
+        # Determina cor baseada na performance
+        if percentage >= 80:
+            status = "[EXCELLENT]"
+        elif percentage >= 60:
+            status = "[GOOD]"
+        elif percentage >= 40:
+            status = "[WARNING]"
+        else:
+            status = "[CRITICAL]"
+        
+        return f"{label}: {status}\n  [{bar}] {percentage:5.1f}% ({value:.2f}/{max_value:.2f})"
+    
     def get_openai_metrics(self, metrics_text: str) -> Dict:
         """Extrai todas as métricas relacionadas à OpenAI"""
         # Parse das requisições com labels
@@ -58,8 +258,19 @@ class MetricsDashboard:
         completion_tokens = tokens_data.get('completion', 0)
         total_tokens = tokens_data.get('total', 0)
         
-        # Custos
-        cost = sum(self.parse_metric(metrics_text, 'openai_estimated_cost_usd_total'))
+        # Custos - calcula baseado nos tokens reais
+        prompt_tokens = tokens_data.get('prompt', 0)
+        completion_tokens = tokens_data.get('completion', 0)
+        
+        # Preços corretos baseados no LangSmith
+        prompt_cost_per_1k = 0.00132  # $0.00132 per 1K input tokens
+        completion_cost_per_1k = 0.010  # $0.010 per 1K output tokens
+        
+        # Calcula custo real baseado nos tokens
+        calculated_cost = ((prompt_tokens / 1000) * prompt_cost_per_1k) + ((completion_tokens / 1000) * completion_cost_per_1k)
+        
+        # Usa o custo calculado se disponível, senão usa o da métrica
+        cost = calculated_cost if calculated_cost > 0 else sum(self.parse_metric(metrics_text, 'openai_estimated_cost_usd_total'))
         
         # Reparos
         repairs_data = self.parse_labeled_metric(metrics_text, 'openai_repair_attempts_total')
@@ -167,6 +378,66 @@ class MetricsDashboard:
             return "[WARN] ATENCAO", "orange"
         else:
             return "[CRIT] CRITICO", "red"
+    
+    def calculate_statistics(self, metrics: Dict) -> Dict:
+        """Calcula estatísticas avançadas"""
+        stats = {}
+        
+        # Estatísticas de performance
+        durations = [metrics.get('avg_duration', 0)]
+        if durations[0] > 0:
+            stats['performance'] = {
+                'mean': statistics.mean(durations),
+                'median': statistics.median(durations),
+                'std_dev': statistics.stdev(durations) if len(durations) > 1 else 0,
+                'min': min(durations),
+                'max': max(durations)
+            }
+        
+        # Estatísticas de custo
+        costs = [metrics.get('cost', 0)]
+        if costs[0] > 0:
+            stats['cost'] = {
+                'mean': statistics.mean(costs),
+                'median': statistics.median(costs),
+                'std_dev': statistics.stdev(costs) if len(costs) > 1 else 0,
+                'min': min(costs),
+                'max': max(costs)
+            }
+        
+        return stats
+    
+    def create_heatmap_data(self, metrics: Dict) -> Dict:
+        """Cria dados para visualização tipo heatmap"""
+        heatmap = {}
+        
+        # Performance vs Custo
+        performance_score = min(100, max(0, 100 - (metrics.get('avg_duration', 0) * 2)))
+        cost_score = min(100, max(0, 100 - (metrics.get('cost', 0) * 1000)))
+        efficiency_score = (performance_score + cost_score) / 2
+        
+        heatmap['performance'] = performance_score
+        heatmap['cost_efficiency'] = cost_score
+        heatmap['overall_efficiency'] = efficiency_score
+        
+        # Taxa de sucesso
+        total_requests = metrics.get('requests', {}).get('success', 0) + metrics.get('requests', {}).get('error', 0)
+        if total_requests > 0:
+            success_rate = (metrics.get('requests', {}).get('success', 0) / total_requests) * 100
+            heatmap['reliability'] = success_rate
+        else:
+            heatmap['reliability'] = 0
+        
+        return heatmap
+    
+    def print_advanced_header(self):
+        """Imprime cabeçalho avançado do dashboard"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print("\n" + "="*100)
+        print("🚀 [ADVANCED DASHBOARD] MICROSERVICO DE EXTRACAO DE REUNIOES")
+        print(f"⏰ [TEMPO] Atualizado em: {now}")
+        print(f"🌐 [API] {self.base_url}")
+        print("="*100)
     
     def print_header(self):
         """Imprime cabeçalho do dashboard"""
@@ -425,9 +696,9 @@ class MetricsDashboard:
             prompt_tokens = openai_metrics['tokens']['prompt']
             completion_tokens = openai_metrics['tokens']['completion']
             
-            # Custos aproximados por tipo (GPT-4o)
-            prompt_cost_per_1k = 0.005  # $0.005 per 1K input tokens
-            completion_cost_per_1k = 0.015  # $0.015 per 1K output tokens
+            # Custos reais por tipo (GPT-4o) - baseado no LangSmith
+            prompt_cost_per_1k = 0.00132  # $0.00132 per 1K input tokens (baseado em 1624 tokens = $0.00214)
+            completion_cost_per_1k = 0.010  # $0.010 per 1K output tokens (baseado em 500 tokens = $0.005)
             
             estimated_prompt_cost = (prompt_tokens / 1000) * prompt_cost_per_1k
             estimated_completion_cost = (completion_tokens / 1000) * completion_cost_per_1k
@@ -529,6 +800,218 @@ class MetricsDashboard:
             print("Nenhuma reuniao processada ainda")
             print("Execute algumas requisicoes para ver estatisticas")
     
+    def print_advanced_visualizations(self, openai_metrics: Dict, performance_metrics: Dict, business_metrics: Dict):
+        """Imprime visualizações avançadas"""
+        print(f"\n🎨 [VISUALIZACOES AVANCADAS]")
+        print("-" * 80)
+        
+        # Gráfico de distribuição de tipos de reunião
+        if business_metrics['meetings_by_type']:
+            print("\n📊 Distribuição de Tipos de Reunião:")
+            print(self.create_ascii_chart(business_metrics['meetings_by_type'], "Tipos de Reunião", 40))
+        
+        # Medidores de performance
+        print(f"\n⚡ Medidores de Performance:")
+        
+        # Performance de tempo
+        avg_duration = performance_metrics['extraction']['avg_duration']
+        print(self.create_performance_gauge(avg_duration, 30, "Tempo Médio de Processamento"))
+        
+        # Taxa de sucesso
+        total_requests = openai_metrics['requests']['success'] + openai_metrics['requests']['error']
+        if total_requests > 0:
+            success_rate = (openai_metrics['requests']['success'] / total_requests) * 100
+            print(f"\n{self.create_performance_gauge(success_rate, 100, 'Taxa de Sucesso')}")
+        
+        # Eficiência de custo
+        if business_metrics['total_meetings'] > 0:
+            cost_per_meeting = openai_metrics['cost'] / business_metrics['total_meetings']
+            print(f"\n{self.create_performance_gauge(cost_per_meeting, 0.10, 'Custo por Reunião (USD)')}")
+    
+    def print_trend_analysis(self, trends: List[TrendData]):
+        """Imprime análise de tendências"""
+        if not trends:
+            return
+        
+        print(f"\n📈 [ANALISE DE TENDENCIAS]")
+        print("-" * 60)
+        
+        for trend in trends:
+            direction_icon = "📈" if trend.trend_direction == "UP" else "📉" if trend.trend_direction == "DOWN" else "➡️"
+            
+            # Determina se a tendência é boa ou ruim
+            is_good_trend = False
+            if trend.metric_name == 'success_rate' and trend.trend_direction == "UP":
+                is_good_trend = True
+            elif trend.metric_name == 'avg_duration' and trend.trend_direction == "DOWN":
+                is_good_trend = True
+            elif trend.metric_name == 'total_cost' and trend.trend_direction == "DOWN":
+                is_good_trend = True
+            
+            status = "✅" if is_good_trend else "⚠️" if trend.trend_direction != "STABLE" else "➡️"
+            
+            print(f"{status} {direction_icon} {trend.metric_name.replace('_', ' ').title()}: "
+                  f"{trend.change_percent:+.1f}% "
+                  f"({trend.previous_value:.2f} → {trend.current_value:.2f})")
+    
+    def print_heatmap_analysis(self, metrics: Dict):
+        """Imprime análise tipo heatmap"""
+        heatmap = self.create_heatmap_data(metrics)
+        
+        print(f"\n🔥 [HEATMAP DE EFICIENCIA]")
+        print("-" * 60)
+        
+        # Performance Score
+        perf_score = heatmap['performance']
+        perf_bar = "█" * int(perf_score / 5) + "░" * (20 - int(perf_score / 5))
+        perf_status = "EXCELLENT" if perf_score >= 80 else "GOOD" if perf_score >= 60 else "WARNING" if perf_score >= 40 else "CRITICAL"
+        print(f"🚀 Performance:    [{perf_bar}] {perf_score:5.1f}% [{perf_status}]")
+        
+        # Reliability Score
+        rel_score = heatmap['reliability']
+        rel_bar = "█" * int(rel_score / 5) + "░" * (20 - int(rel_score / 5))
+        rel_status = "EXCELLENT" if rel_score >= 95 else "GOOD" if rel_score >= 85 else "WARNING" if rel_score >= 70 else "CRITICAL"
+        print(f"🛡️  Confiabilidade: [{rel_bar}] {rel_score:5.1f}% [{rel_status}]")
+        
+        # Cost Efficiency Score
+        cost_score = heatmap['cost_efficiency']
+        cost_bar = "█" * int(cost_score / 5) + "░" * (20 - int(cost_score / 5))
+        cost_status = "EXCELLENT" if cost_score >= 80 else "GOOD" if cost_score >= 60 else "WARNING" if cost_score >= 40 else "CRITICAL"
+        print(f"💰 Eficiência:     [{cost_bar}] {cost_score:5.1f}% [{cost_status}]")
+        
+        # Overall Score
+        overall_score = heatmap['overall_efficiency']
+        overall_bar = "█" * int(overall_score / 5) + "░" * (20 - int(overall_score / 5))
+        overall_status = "EXCELLENT" if overall_score >= 80 else "GOOD" if overall_score >= 60 else "WARNING" if overall_score >= 40 else "CRITICAL"
+        print(f"🎯 Score Geral:    [{overall_bar}] {overall_score:5.1f}% [{overall_status}]")
+    
+    def print_statistical_analysis(self, metrics: Dict):
+        """Imprime análise estatística avançada"""
+        stats = self.calculate_statistics(metrics)
+        
+        print(f"\n📊 [ANALISE ESTATISTICA]")
+        print("-" * 60)
+        
+        if 'performance' in stats:
+            perf = stats['performance']
+            print(f"⏱️  Performance (Tempo):")
+            print(f"   Média: {perf['mean']:.2f}s | Mediana: {perf['median']:.2f}s")
+            print(f"   Desvio: {perf['std_dev']:.2f}s | Range: {perf['min']:.2f}s - {perf['max']:.2f}s")
+        
+        if 'cost' in stats:
+            cost = stats['cost']
+            print(f"\n💰 Custo:")
+            print(f"   Média: ${cost['mean']:.4f} | Mediana: ${cost['median']:.4f}")
+            print(f"   Desvio: ${cost['std_dev']:.4f} | Range: ${cost['min']:.4f} - ${cost['max']:.4f}")
+        
+        # Análise de eficiência
+        tokens = metrics.get('tokens', {})
+        if tokens.get('prompt', 0) > 0 and tokens.get('completion', 0) > 0:
+            efficiency = tokens.get('completion', 0) / tokens.get('prompt', 0)
+            print(f"\n🎯 Eficiência de Tokens: {efficiency:.2f}")
+            
+            if efficiency > 0.5:
+                print("   ✅ Alta eficiência - boa proporção prompt/resposta")
+            elif efficiency > 0.2:
+                print("   ⚠️  Eficiência moderada - considere otimizar prompts")
+            else:
+                print("   ❌ Baixa eficiência - prompts muito longos ou respostas muito curtas")
+    
+    def print_advanced_alerts(self, alerts: List[Alert]):
+        """Imprime alertas avançados com categorização"""
+        if not alerts:
+            print(f"\n✅ [SISTEMA SAUDAVEL] Nenhum alerta ativo")
+            return
+        
+        print(f"\n🚨 [ALERTAS AVANCADOS]")
+        print("-" * 80)
+        
+        # Agrupa alertas por categoria
+        by_category = defaultdict(list)
+        for alert in alerts:
+            by_category[alert.category].append(alert)
+        
+        # Ícones por categoria
+        category_icons = {
+            'ERROR': '❌',
+            'PERFORMANCE': '⚡',
+            'COST': '💰',
+            'EFFICIENCY': '🎯'
+        }
+        
+        for category, category_alerts in by_category.items():
+            icon = category_icons.get(category, '⚠️')
+            print(f"\n{icon} {category}:")
+            
+            for alert in category_alerts:
+                severity_icon = "🔴" if alert.severity == "CRIT" else "🟡" if alert.severity == "WARN" else "🔵"
+                print(f"   {severity_icon} {alert.message}")
+                print(f"      💡 {alert.recommendation}")
+                print(f"      📊 Valor: {alert.value:.2f} | Limite: {alert.threshold:.2f}")
+    
+    def generate_advanced_dashboard(self):
+        """Gera o dashboard avançado completo"""
+        metrics_text = self.get_metrics()
+        if not metrics_text:
+            self.print_advanced_header()
+            print("\n❌ [ERROR] Nao foi possivel obter metricas")
+            print("🔧 [SOLUTION] Para iniciar a API:")
+            print("  1. cd projeto")
+            print("  2. venv\\Scripts\\activate  (Windows)")
+            print("  3. uvicorn app.main:app --reload")
+            return
+        
+        # Extrair métricas
+        openai_metrics = self.get_openai_metrics(metrics_text)
+        performance_metrics = self.get_performance_metrics(metrics_text)
+        business_metrics = self.get_business_metrics(metrics_text)
+        
+        # Combinar métricas para análise
+        combined_metrics = {
+            'requests': openai_metrics['requests'],
+            'cost': openai_metrics['cost'],
+            'tokens': openai_metrics['tokens'],
+            'avg_duration': performance_metrics['extraction']['avg_duration'],
+            'total_meetings': business_metrics['total_meetings'],
+            'success_rate': (openai_metrics['requests']['success'] / 
+                           (openai_metrics['requests']['success'] + openai_metrics['requests']['error']) * 100 
+                           if (openai_metrics['requests']['success'] + openai_metrics['requests']['error']) > 0 else 0)
+        }
+        
+        # Calcular tendências
+        trends = self.calculate_trends(combined_metrics, self.previous_metrics)
+        
+        # Gerar alertas avançados
+        alerts = self.generate_advanced_alerts(combined_metrics)
+        
+        # Salvar métricas para próxima comparação
+        self.previous_metrics = combined_metrics.copy()
+        
+        # Imprimir dashboard avançado
+        self.print_advanced_header()
+        self.print_health_section(openai_metrics, performance_metrics)
+        self.print_business_section(business_metrics)
+        self.print_openai_section(openai_metrics)
+        self.print_performance_section(performance_metrics)
+        
+        # Seções avançadas
+        self.print_advanced_visualizations(openai_metrics, performance_metrics, business_metrics)
+        self.print_trend_analysis(trends)
+        self.print_heatmap_analysis(combined_metrics)
+        self.print_statistical_analysis(combined_metrics)
+        self.print_advanced_alerts(alerts)
+        
+        # Análise de custos e resumo
+        self.print_cost_analysis(openai_metrics, performance_metrics, business_metrics)
+        self.print_summary(openai_metrics, performance_metrics, business_metrics)
+        
+        print("\n" + "="*100)
+        print("💡 [TIPS] Comandos disponíveis:")
+        print("   python dashboard.py --watch    (monitoramento em tempo real)")
+        print("   python dashboard.py --advanced (dashboard avançado)")
+        print("   python dashboard.py --simple   (dashboard simples)")
+        print("="*100 + "\n")
+    
     def generate_dashboard(self):
         """Gera o dashboard completo"""
         metrics_text = self.get_metrics()
@@ -574,19 +1057,53 @@ def main():
     """Função principal"""
     dashboard = MetricsDashboard()
     
-    if len(sys.argv) > 1 and sys.argv[1] == "--watch":
-        # Modo watch - atualiza a cada 10 segundos
-        print("[WATCH] Modo monitoramento ativo (Ctrl+C para sair)")
-        try:
-            while True:
-                os.system('cls' if os.name == 'nt' else 'clear')  # Limpa tela
-                dashboard.generate_dashboard()
-                time.sleep(10)
-        except KeyboardInterrupt:
-            print("\n[EXIT] Monitoramento interrompido!")
+    if len(sys.argv) > 1:
+        mode = sys.argv[1]
+        
+        if mode == "--watch":
+            # Modo watch - atualiza a cada 10 segundos
+            print("🔄 [WATCH] Modo monitoramento ativo (Ctrl+C para sair)")
+            try:
+                while True:
+                    os.system('cls' if os.name == 'nt' else 'clear')  # Limpa tela
+                    dashboard.generate_advanced_dashboard()
+                    time.sleep(10)
+            except KeyboardInterrupt:
+                print("\n🚪 [EXIT] Monitoramento interrompido!")
+        
+        elif mode == "--advanced":
+            # Modo dashboard avançado
+            dashboard.generate_advanced_dashboard()
+        
+        elif mode == "--simple":
+            # Modo dashboard simples
+            dashboard.generate_dashboard()
+        
+        elif mode == "--help":
+            print("🚀 [DASHBOARD] MICROSERVICO DE EXTRACAO DE REUNIOES")
+            print("="*60)
+            print("📋 Comandos disponíveis:")
+            print("   python dashboard.py              (dashboard padrão)")
+            print("   python dashboard.py --simple     (dashboard simples)")
+            print("   python dashboard.py --advanced   (dashboard avançado)")
+            print("   python dashboard.py --watch      (monitoramento em tempo real)")
+            print("   python dashboard.py --help       (esta ajuda)")
+            print("\n💡 O dashboard avançado inclui:")
+            print("   • Gráficos ASCII e visualizações")
+            print("   • Análise de tendências")
+            print("   • Heatmap de eficiência")
+            print("   • Análise estatística")
+            print("   • Alertas inteligentes")
+            print("   • Medidores de performance")
+            print("="*60)
+        
+        else:
+            print(f"❌ [ERROR] Modo desconhecido: {mode}")
+            print("💡 Use --help para ver os comandos disponíveis")
+    
     else:
-        # Modo single shot
-        dashboard.generate_dashboard()
+        # Modo padrão - dashboard avançado
+        dashboard.generate_advanced_dashboard()
 
 if __name__ == "__main__":
     main()
